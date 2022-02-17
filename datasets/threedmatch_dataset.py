@@ -1,124 +1,145 @@
-
-import torch
-import numpy as np
-import os
-import random
-from tqdm import tqdm
-from .datasets.pcam_dataset import PCAMDataset
-from .tool.transforms import sample_random_trans, apply_transform, sample_points, ground_truth_attention
-from .tool.file import read_trajectory
+import os 
 import open3d as o3d
+import numpy as np
+import torch
+
+from scipy.spatial.transform import Rotation
+from scipy.linalg import expm, norm
+from sklearn.neighbors import NearestNeighbors
+from torch.utils.data import Dataset
+
+from tools.utils import load_obj, to_tsfm, to_o3d_pcd, to_tensor, get_correspondences
+from tools.model_util import npmat2euler
+from tools.file import read_trajectory
+from tools.pointcloud import get_matching_indices, make_open3d_point_cloud
+from tools.transforms import sample_points
+
 import MinkowskiEngine as ME
-import glob
+
+# Rotation matrix along axis with angle theta
+def M(axis, theta):
+    return expm(np.cross(np.eye(3), axis / norm(axis) * theta))
+
+def sample_random_trans(pcd, randg, rotation_range=360):
+    T = np.eye(4)
+    R = M(randg.rand(3) - 0.5, rotation_range * np.pi / 180.0 * (randg.rand(1) - 0.5))
+    T[:3, :3] = R
+    T[:3, 3] = R.dot(-np.mean(pcd, axis=0))
+    return T
 
 
-class ThreeDMatchDataset(PCAMDataset):
+class ThreeDMatchPairDataset(Dataset):
+  
+    AUGMENT = None
+
     OVERLAP_RATIO = 0.3
-    dir_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'split')
-    DATA_FILES = {
-        'train': os.path.join(dir_path, 'train_3dmatch.txt'),
-        'val': os.path.join(dir_path, 'val_3dmatch.txt'),
-        'test': os.path.join(dir_path, 'test_3dmatch.txt'),
-    }
-    def __init__(self,
-                 root,
-                 phase,
-                 min_scale=0.8,
-                 max_scale=1.2,
-                 random_scale=False,
-                 rotation_range=360,
-                 voxel_size=0.05,
-                 num_points=2048):
-        super(ThreeDMatchDataset, self).__init__(root, phase, voxel_size, num_points)
-        self.min_scale = min_scale
-        self.max_scale = max_scale
-        self.random_scale = random_scale
-        self.phase = phase
 
-        self.files = []
-        self.randg = np.random.RandomState()
-        self.rotation_range = rotation_range
 
-        subset_names = open(self.DATA_FILES[phase]).read().split()
-        if phase == "test":
-            for sname in subset_names:
-                traj_file = os.path.join(self.root, sname + '-evaluation/gt.log')
-                assert os.path.exists(traj_file)
-                traj = read_trajectory(traj_file)
-                for ctraj in traj:
-                    i = ctraj.metadata[0]
-                    j = ctraj.metadata[1]
-                    T_gt = ctraj.pose
-                    self.files.append((sname, i, j, T_gt))
-        else:
-            for name in subset_names:
-              fname = name + "*%.2f.txt" % self.OVERLAP_RATIO
-              fnames_txt = glob.glob(root + "/" + fname)
-              assert len(fnames_txt) > 0, f"Make sure that the path {root} has data {fname}"
-              for fname_txt in fnames_txt:
-                with open(fname_txt) as f:
-                  content = f.readlines()
-                fnames = [x.strip().split() for x in content]
-                for fname in fnames:
-                  self.files.append([fname[0], fname[1]])
+    def __init__(self, infos, config, data_augmentation=True):
+        super(ThreeDMatchPairDataset,self).__init__()
 
+        self.infos = infos
+        self.root = root = config.threed_match_dir
+        self.data_augmentation=data_augmentation
+        self.config = config
+        self.voxel_size = config.voxel_size
+        self.search_voxel_size = config.voxel_size * config.positive_pair_search_voxel_size_multiplier
+        self.num_points = config.num_points
+        self.rot_factor=1.
+        self.augment_noise = config.augment_noise
+        
+    def __len__(self):
+        return len(self.infos['rot'])
+    
+    def apply_transform(self, pts, trans):
+        R = trans[:3, :3]
+        T = trans[:3, 3]
+        return pts @ R.T + T
+    
+    def ground_truth_attention(self, p1, p2, trans):
+        
+        p1 = sample_points(p1, self.num_points)
+        p2 = sample_points(p2, self.num_points)
+
+        ideal_pts2 = self.apply_transform(p1, trans)    
+
+        nn = NearestNeighbors(n_neighbors=1).fit(p2)
+        distance, neighbors = nn.kneighbors(ideal_pts2)
+        neighbors1 = neighbors[distance < 0.3]
+        pcd1 = p2[neighbors1]
+        
+        # Search NN for each p2 in ideal_pt2
+        nn = NearestNeighbors(n_neighbors=1).fit(ideal_pts2)
+        distance, neighbors = nn.kneighbors(p2)
+        neighbors2 = neighbors[distance < 0.3]
+        pcd0 = p1[neighbors2]
+    
+        return pcd0, pcd1, neighbors2, neighbors1
 
     def __getitem__(self, idx):
-        if self.phase == "test":
-            file_name, i, j, T_gt = self.files[idx]
-            ply_name0 = os.path.join(self.root, file_name, f'cloud_bin_{i}.ply')
-            ply_name1 = os.path.join(self.root, file_name, f'cloud_bin_{j}.ply')
-            xyz0 = o3d.io.read_point_cloud(ply_name0)
-            xyz1 = o3d.io.read_point_cloud(ply_name1)
-            xyz0 = np.asarray(xyz0.points)
-            xyz1 = np.asarray(xyz1.points)
+        # get transformation
+        rot = self.infos['rot'][idx]
+        trans = self.infos['trans'][idx]
 
-            ############ DUE TO BIAS AT TRAINING TIME WITH CENTERED POINT CLOUD
-            xyz0_mean = xyz0.mean(0, keepdims=True)
-            xyz1_mean = xyz1.mean(0, keepdims=True)
-            xyz0 = xyz0 - xyz0_mean
-            xyz1 = xyz1 - xyz1_mean
-            ############
+        tsfm = to_tsfm(rot, trans)
 
-        else:
-            file0 = os.path.join(self.root, self.files[idx][0])
-            file1 = os.path.join(self.root, self.files[idx][1])
-            data0 = np.load(file0)
-            data1 = np.load(file1)
-            file_name = self.files[idx][0] + "_" + self.files[idx][1]
-            xyz0 = data0["pcd"]
-            xyz1 = data1["pcd"]
+        file0 = os.path.join(self.root, self.infos['src'][idx])
+        file1 = os.path.join(self.root, self.infos['tgt'][idx])
+        src_pcd = torch.load(file0)
+        tgt_pcd = torch.load(file1)
 
-            if self.random_scale and random.random() < 0.95:
-                scale = self.min_scale + (self.max_scale - self.min_scale) * random.random()
-                xyz0 = scale * xyz0
-                xyz1 = scale * xyz1
-            T0 = sample_random_trans(xyz0, self.randg, self.rotation_range)
-            T1 = sample_random_trans(xyz1, self.randg, self.rotation_range)
-            T_gt = T1 @ np.linalg.inv(T0)
+        search_voxel_size = self.search_voxel_size
 
-            xyz0 = apply_transform(xyz0, T0)
-            xyz1 = apply_transform(xyz1, T1)
+        # add gaussian noise
+        if self.data_augmentation:            
+            # rotate the point cloud
+            euler_ab = np.random.rand(3) * np.pi * 2 / self.rot_factor # anglez, angley, anglex
+            rot_ab = Rotation.from_euler('zyx', euler_ab).as_matrix()
+            if(np.random.rand(1)[0] > 0.5):
+                src_pcd = np.matmul(rot_ab,src_pcd.T).T
+                rot = np.matmul(rot,rot_ab.T)
+            else:
+                tgt_pcd = np.matmul(rot_ab,tgt_pcd.T).T
+                rot = np.matmul(rot_ab,rot)
+                trans = np.matmul(rot_ab,trans)
 
-            xyz0_mean, xyz1_mean = np.zeros((1, 3)), np.zeros((1, 3))
+            src_pcd += (np.random.rand(src_pcd.shape[0],3) - 0.5) * self.augment_noise
+            tgt_pcd += (np.random.rand(tgt_pcd.shape[0],3) - 0.5) * self.augment_noise
+        
+
+        """ T0 = sample_random_trans(xyz0, self.randg, self.rotation_range)
+        T1 = sample_random_trans(xyz1, self.randg, self.rotation_range)
+        trans = T1 @ np.linalg.inv(T0)
+
+        xyz0 = self.apply_transform(xyz0, T0)
+        xyz1 = self.apply_transform(xyz1, T1)
+        """
+        
+        euler = npmat2euler(rot, 'zyx')
 
         # Voxelization
-        xyz0_th = torch.from_numpy(xyz0)
-        xyz1_th = torch.from_numpy(xyz1)
+        _, sel0 = ME.utils.sparse_quantize(np.ascontiguousarray(src_pcd) / self.voxel_size, return_index=True)
+        _, sel1 = ME.utils.sparse_quantize(np.ascontiguousarray(tgt_pcd) / self.voxel_size, return_index=True)
 
-        sel0 = ME.utils.sparse_quantize(xyz0_th / self.voxel_size, return_index=True)
-        sel1 = ME.utils.sparse_quantize(xyz1_th / self.voxel_size, return_index=True)
-        
-        unique_xyz0_th = xyz0_th[sel0]
-        unique_xyz1_th = xyz1_th[sel1]
-        
-        unique_xyz0_th, unique_xyz1_th = unique_xyz0_th.float().numpy(), unique_xyz1_th.float().numpy()
-        unique_xyz0_th = sample_points(unique_xyz0_th, self.num_points)
-        unique_xyz1_th = sample_points(unique_xyz1_th, self.num_points)
+        # get correspondence
+        tsfm = to_tsfm(rot, trans)
+        src_xyz, tgt_xyz = src_pcd[sel0], tgt_pcd[sel1] # raw point clouds
+        matching_inds = get_correspondences(to_o3d_pcd(src_xyz), to_o3d_pcd(tgt_xyz), tsfm, search_voxel_size)
 
-        if self.phase == "test":
-            T_gt = np.linalg.inv(T_gt)
+        src_over, tgt_over, over_index0, over_index1 = self.ground_truth_attention(src_xyz, tgt_xyz, tsfm)
 
-        one_one_attention = ground_truth_attention(unique_xyz0_th, unique_xyz1_th, T_gt)
+        # get voxelized coordinates
+        src_coords, tgt_coords = np.floor(src_xyz / self.voxel_size), np.floor(tgt_xyz / self.voxel_size)
 
-        return xyz0_th, xyz1_th, unique_xyz0_th, unique_xyz1_th, T_gt, np.linalg.inv(T_gt), one_one_attention.A, file_name, xyz0_mean, xyz1_mean
+        # get feats
+        src_feats = np.ones((src_coords.shape[0],1),dtype=np.float32)
+        tgt_feats = np.ones((tgt_coords.shape[0],1),dtype=np.float32)
+
+        src_xyz, tgt_xyz = to_tensor(src_xyz).float(), to_tensor(tgt_xyz).float()
+        src_over, tgt_over = to_tensor(src_over).float(), to_tensor(tgt_over).float()
+        over_index0, over_index1 = to_tensor(over_index0).int(), to_tensor(over_index1).int()
+        rot, trans = to_tensor(rot), to_tensor(trans)
+        scale = 1
+
+        return (src_xyz, tgt_xyz, src_coords, tgt_coords, src_feats, tgt_feats, src_over, tgt_over, \
+            over_index0, over_index1, matching_inds, rot, trans, euler, scale)

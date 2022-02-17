@@ -1,68 +1,69 @@
 # Part of the code in this file is taken from https://github.com/chrischoy/DeepGlobalRegistration/blob/46dd264580b4191accedc277f4ae434acdb4d380/dataloader/base_loader.py#L24
 
-from tools.transforms import decompose_rotation_translation
-import lightconvpoint.nn as lcp_nn
+
 import torch
 import numpy as np
+import MinkowskiEngine as ME
+
+from tools.utils import to_tensor 
 
 class CollateFunc:
-  def __init__(self):
-    self.collation_fn = self.collate_pair_fn
 
-  def __call__(self, list_data):
-    return self.collation_fn(list_data)
+    def __init__(self):
+        self.collation_fn = self.collate_pair_fn
 
-  def collate_pair_fn(self, list_data):
-    N = len(list_data)
+    def __call__(self, list_data):
+        return self.collation_fn(list_data)
 
-    list_data = [data for data in list_data if data is not None]
-    if N != len(list_data):
-      logging.info(f"Retain {len(list_data)} from {N} data.")
-    if len(list_data) == 0:
-      raise ValueError('No data in the batch')
+    def collate_pair_fn(list_data):
+        xyz0, xyz1, coords0, coords1, feats0, feats1, xyz0_over, xyz1_over, over_index0, over_index1, matching_inds, rot, trans, euler, scale = list(
+            zip(*list_data))
 
-    xyz0_full, xyz1_full, xyz0, xyz1, trans, inv_trans, one_one_attention, filename, p0_mean, p1_mean = list(
-      zip(*list_data)
-    )
+        # prepare inputs for FCGF
+        src_batch_C, src_batch_F = ME.utils.sparse_collate(coords0, feats0)
+        tgt_batch_C, tgt_batch_F = ME.utils.sparse_collate(coords1, feats1)
 
-    trans_batch = torch.from_numpy(np.stack(trans)).float()
-    inv_trans_batch = torch.from_numpy(np.stack(inv_trans)).float()
+        # concatenate xyz
+        src_xyz = torch.cat(xyz0, 0).float()
+        tgt_xyz = torch.cat(xyz1, 0).float()
 
-    pts1 = torch.from_numpy(np.stack(xyz0)).float()
-    pts2 = torch.from_numpy(np.stack(xyz1)).float()
-    raw_pts1 = torch.from_numpy(np.stack(xyz0_full)).float()
-    raw_pts2 = torch.from_numpy(np.stack(xyz1_full)).float()
+        src_over_xyz = torch.cat(xyz0_over, 0).float()
+        tgt_over_xyz = torch.cat(xyz1_over, 0).float()
 
-    p0_mean = torch.from_numpy(np.stack(p0_mean)).float().transpose(1, 2)
-    p1_mean = torch.from_numpy(np.stack(p1_mean)).float().transpose(1, 2)
+        over_index0 = torch.cat(over_index0, 0).int()
+        over_index1 = torch.cat(over_index1, 0).int()
 
-    Rs, ts = decompose_rotation_translation(trans_batch)
-    Rs_inv, ts_inv = decompose_rotation_translation(inv_trans_batch)
+        # add batch indice to matching_inds
+        matching_inds_batch = []
+        len_batch = []
+        curr_start_ind = torch.zeros((1,2))
 
-    ts = ts.unsqueeze(-1)
-    ts_inv = ts_inv.unsqueeze(-1)
+        for batch_id, _ in enumerate(matching_inds):
+            N0 = coords0[batch_id].shape[0]
+            N1 = coords1[batch_id].shape[0]
+            matching_inds_batch.append(matching_inds[batch_id]+curr_start_ind)
+            len_batch.append([N0,N1])
 
-    search = lcp_nn.SearchQuantized(K=32, stride=1)
-    pts1 = pts1.transpose(1, 2)
-    pts2 = pts2.transpose(1, 2)
-    indices1, pts1 = search(pts1)
-    indices2, pts2 = search(pts2)
+            curr_start_ind[0,0]+=N0
+            curr_start_ind[0,1]+=N1   
 
-    one_one_attention = torch.from_numpy(np.stack(one_one_attention)).float()
+        matching_inds_batch = torch.cat(matching_inds_batch, 0).int()
 
-    return {
-      "raw_src": raw_pts1,
-      "raw_tgt": raw_pts2,
-      "src": pts1,
-      "tgt": pts2,
-      "filename": filename,
-      "attention": one_one_attention,
-      "indices1": indices1,
-      "indices2": indices2,
-      "rotation": Rs,
-      "translation": ts,
-      "inv_rotation": Rs_inv,
-      "inv_translation": ts_inv,
-      "p0_mean": p0_mean,
-      "p1_mean": p1_mean,
-    }
+        return {
+            'pcd0': src_xyz,
+            'pcd1': tgt_xyz,
+            'pcd0_over' : src_over_xyz,
+            'pcd1_over' : tgt_over_xyz,
+            'over_index0' : over_index0,
+            'over_index1' : over_index1,
+            'sinput0_C': src_batch_C,
+            'sinput0_F': src_batch_F.float(),
+            'sinput1_C': tgt_batch_C,
+            'sinput1_F': tgt_batch_F.float(),
+            'correspondences': matching_inds_batch,
+            'rot': rot[0],
+            'trans': trans[0],
+            'scale': scale[0],
+            'Euler_gt': euler[0],
+            'len_batch': len_batch
+        }

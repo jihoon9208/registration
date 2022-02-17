@@ -12,16 +12,17 @@ from sklearn.neighbors import NearestNeighbors
 from scipy.sparse import csr_matrix
 from .pointcloud import get_matching_indices, make_open3d_point_cloud
 
+import open3d as o3d
 
 def decompose_rotation_translation(Ts):
-  Ts = Ts.float()
-  Rs = Ts[:, :3, :3]
-  ts = Ts[:, :3, 3]
+    Ts = Ts.float()
+    Rs = Ts[:, :3, :3]
+    ts = Ts[:, :3, 3]
 
-  Rs.require_grad = False
-  ts.require_grad = False
+    Rs.require_grad = False
+    ts.require_grad = False
 
-  return Rs, ts
+    return Rs, ts
 
 def voxelize(point_cloud, voxel_size):
     # Random permutation (for random selection within voxel)
@@ -48,10 +49,14 @@ def sample_points(pts, num_points):
         pts = np.random.permutation(pts)
     return pts
 
-def ground_truth_attention_distance(xyz0, xyz1, trans, search_voxel_size):
+
+def ground_truth_attention_distance(xyz0, xyz1, color0, color1, trans, search_voxel_size ):
     
     pcd0 = make_open3d_point_cloud(xyz0)
     pcd1 = make_open3d_point_cloud(xyz1)
+
+    pcd0.colors = o3d.utility.Vector3dVector(color0)
+    pcd1.colors = o3d.utility.Vector3dVector(color1)
     # Sizes
     N = xyz0.shape[0]
     M = xyz1.shape[0]
@@ -69,9 +74,9 @@ def ground_truth_attention_distance(xyz0, xyz1, trans, search_voxel_size):
 #     B = csr_matrix((distance[:, 0], (np.arange(M), neighbors)), (M, N)).T
 #     A = A * B
 
-    return A
+    return A, pcd0, pcd1, matches
 
-def ground_truth_attention(p1, p2, trans):
+def ground_truth_attention(p1, p2, color0, color1,trans):
     
     # Ideal pts2 with ground truth transformation
     ideal_pts2 = p1 @ trans[:3, :3].T + trans[:3, 3:4].T
@@ -130,11 +135,11 @@ def sample_random_rotation_z_axis(pcd, randg, rotation_range=360):
     return T
 
 def sample_random_trans(pcd, randg, rotation_range=360):
-  T = np.eye(4)
-  R = M(randg.rand(3) - 0.5, rotation_range * np.pi / 180.0 * (randg.rand(1) - 0.5))
-  T[:3, :3] = R  
-  T[:3, 3] = R.dot(-np.mean(pcd, axis=0))
-  return T
+    T = np.eye(4)
+    R = M(randg.rand(3) - 0.5, rotation_range * np.pi / 180.0 * (randg.rand(1) - 0.5))
+    T[:3, :3] = R  
+    T[:3, 3] = R.dot(-np.mean(pcd, axis=0))
+    return T
 
 def apply_transform(pts, trans):
     R = trans[:3, :3]
@@ -143,34 +148,36 @@ def apply_transform(pts, trans):
     return pts
 
 class Compose:
-  def __init__(self, transforms):
-    self.transforms = transforms
+    def __init__(self, transforms):
+        self.transforms = transforms
 
-  def __call__(self, coords, feats):
-    for transform in self.transforms:
-      coords, feats = transform(coords, feats)
-    return coords, feats
+    def __call__(self, coords, feats):
+        for transform in self.transforms:
+            coords, feats = transform(coords, feats)
+        return coords, feats
 
 
 class Jitter:
-  def __init__(self, mu=0, sigma=0.01):
-    self.mu = mu
-    self.sigma = sigma
 
-  def __call__(self, coords, feats):
-    if random.random() < 0.95:
-      feats += self.sigma * torch.randn(feats.shape[0], feats.shape[1])
-      if self.mu != 0:
-        feats += self.mu
-    return coords, feats
+    def __init__(self, mu=0, sigma=0.01):
+        self.mu = mu
+        self.sigma = sigma
+
+    def __call__(self, coords, feats):
+        if random.random() < 0.95:
+            if isinstance(feats, np.ndarray):
+                feats += np.random.normal(self.mu, self.sigma, (feats.shape[0], feats.shape[1]))
+            else:
+                feats += (torch.randn_like(feats) * self.sigma) + self.mu
+        return coords, feats
 
 
 class ChromaticShift:
-  def __init__(self, mu=0, sigma=0.1):
-    self.mu = mu
-    self.sigma = sigma
+    def __init__(self, mu=0, sigma=0.1):
+        self.mu = mu
+        self.sigma = sigma
 
-  def __call__(self, coords, feats):
-    if random.random() < 0.95:
-      feats[:, :3] += torch.randn(self.mu, self.sigma, (1, 3))
-    return coords, feats
+    def __call__(self, coords, feats):
+        if random.random() < 0.95:
+            feats[:, :3] += torch.randn(self.mu, self.sigma, (1, 3))
+        return coords, feats

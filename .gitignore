@@ -1,0 +1,20 @@
+# Temp files
+__pycache__
+*.swp
+*.swo
+*.orig
+.idea
+outputs/
+*.pyc
+*.ply
+*.pth
+CMakeCache.txt
+cmake_install.cmake
+*.so 
+CMakeFiles/
+build/
+Makefile
+.vscode/
+features_tmp/
+configs/
+data/
