@@ -3,56 +3,46 @@ from __future__ import print_function
 import torch
 import numpy as np
 from scipy.spatial.transform import Rotation
-
+import torch.nn.functional as F
 
 # Part of the code is referred from: https://github.com/ClementPinard/SfmLearner-Pytorch/blob/master/inverse_warp.py
 # Part of the code is referred from: https://github.com/WangYueFt/dcp
 
-def quat2mat(quat):
-    x, y, z, w = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
-
-    B = quat.size(0)
-
-    w2, x2, y2, z2 = w.pow(2), x.pow(2), y.pow(2), z.pow(2)
-    wx, wy, wz = w*x, w*y, w*z
-    xy, xz, yz = x*y, x*z, y*z
-
-    rotMat = torch.stack([w2 + x2 - y2 - z2, 2*xy - 2*wz, 2*wy + 2*xz,
-                          2*wz + 2*xy, w2 - x2 + y2 - z2, 2*yz - 2*wx,
-                          2*xz - 2*wy, 2*wx + 2*yz, w2 - x2 - y2 + z2], dim=1).reshape(B, 3, 3)
-    return rotMat
 
 def transform_point_cloud(point_cloud, rotation, translation):
-    if len(rotation.size()) == 2:
-        rot_mat = quat2mat(rotation)
-    else:
-        rot_mat = rotation
-    return torch.matmul(rot_mat, point_cloud) + translation.unsqueeze(2)
+    
+    return point_cloud @ rotation + translation
 
-def npmat2euler(mats, seq=None):
+def transform_point_cloud0(point_cloud, rotation, translation):
+    
+    rot_mat = rotation
+    return point_cloud @ rot_mat.T + translation.T
+
+def npmat2euler(mats, seq='zyx'):
     eulers = []
     for i in range(mats.shape[0]):
-        r = Rotation.from_mrp(mats[i])
+        r = Rotation.from_mrp(mats[i].T)
         eulers.append(r.as_euler(seq, degrees=True))
     return np.asarray(eulers, dtype='float32')
 
-def square_dist_torch(A, B):
-    AA = (A**2).sum(dim=1, keepdim=True)
-    BB = (B**2).sum(dim=1, keepdim=True)
-    inner = torch.matmul(A.float(), B.float().T)
+def square_dist_torch(src, dst):
 
-    R = AA + (-2)*inner + BB.T
+    N, _ = src.shape
+    M, _ = dst.shape
+    dist = -2 * torch.matmul(src, dst.permute(1,0))     
+    dist += torch.sum(src ** 2, -1).view(N, 1)
+    dist += torch.sum(dst ** 2, -1).view(1, M)
 
-    return R
+    return dist 
 
 def new_cdist(x1, x2):
-        x1 = x1.float()
-        x2 = x2.float()
-        x1_norm = x1.pow(2).sum(dim=-1, keepdim=True).float()
-        x2_norm = x2.pow(2).sum(dim=-1, keepdim=True).float()
-        res = -2*torch.matmul(x1, x2.transpose(-2, -1)) + x2_norm.transpose(-2, -1) + x1_norm
-        res = res.clamp_min_(1e-30).sqrt_()
-        return res
+    x1 = x1.float()
+    x2 = x2.float()
+    #x1_norm = x1.pow(2).sum(dim=-1, keepdim=True).float()
+    #x2_norm = x2.pow(2).sum(dim=-1, keepdim=True).float()
+    res = torch.matmul(x1, x2.T)
+    res = res.clamp_min_(1e-30).sqrt_()
+    return res
 
 def dist_torch(A,B):
     """
@@ -61,12 +51,19 @@ def dist_torch(A,B):
     :param B: Point Cloud: Mx3 Array of real numbers
     :return:  NxM array, where element [i,j] is the squared distance between the i'th point in A and the j'th point in B
     """
-    s = square_dist_torch(A,B)
+
+    s = torch.matmul(A.float(), B.float().T)
     s[s<0]=0
     return torch.sqrt(s)
 
-def cdist_torch(A,B,points_dim=None):
-    num_features = 512
+def dist_feat(A, B):
+
+    feat_map = torch.matmul(A.float().T, B.float())
+    feat_map[feat_map<0]=0
+    return torch.sqrt(feat_map)
+
+def cdist_torch(A, B, points_dim=None):
+    num_features = 64
     if points_dim is not None:
         num_features = points_dim
     if (A.shape[-1] != num_features):
@@ -97,6 +94,7 @@ def representative_neighbor_dist_torch(D):
     """
     Accepts a distance matrix between all points in a set,
     returns a number that is representative of the distances in this set.
+
     :param D: Distance matrix, where element [i,j] is the distance between i'th point in the set and the j'th point in the set. Should be symmetric with zeros on the diagonal.
     :return: The representative distance in this set
     """
@@ -106,11 +104,12 @@ def representative_neighbor_dist_torch(D):
     neighbor_dist = m.median()
     return neighbor_dist.cpu().detach().numpy()
 
-def guess_best_alpha_torch(A,dim_num=3, transpose=None):
+def guess_best_alpha_torch1(A,dim_num=3, transpose=None):
     """
         A good guess for the temperature of the soft argmin (alpha) can
         be calculated as a linear function of the representative (e.g. median)
         distance of points to their nearest neighbor in a point cloud.
+
         :param A: Point Cloud of size Nx3
         :return: Estimated value of alpha
         """
@@ -125,39 +124,46 @@ def guess_best_alpha_torch(A,dim_num=3, transpose=None):
     rep = representative_neighbor_dist_torch(dist_torch(A, A))
     return COEFF * rep + EPS
 
-def soft_BBS_loss_torch(T, S, t, points_dim=None, return_mat=False, transpose=None):
-    num_features = 512
-    if transpose is None:
-        assert S.shape[0] != S.shape[1] and T.shape[0] != T.shape[1], 'Number of points and number of dimensions can''t be same'
-    if points_dim is not None:
-        num_features = points_dim
-    if (T.shape[1] is not num_features and transpose is None) or transpose:
-        T = torch.transpose(T, dim0=0, dim1=1)
-    if (S.shape[1] is not num_features and transpose is None) or transpose:
-        S = torch.transpose(S, dim0=0, dim1=1)
-    assert S.shape[1] == num_features and T.shape[1] == num_features, 'Points dimension dismatch'
+def guess_best_alpha_torch( feat, dim_num=3, transpose=None):
+    
+    COEFF = 0.1
+    EPS = 1e-8
+    
+    feat_map = dist_feat(feat, feat)
+    diag_ind = range(feat_map.shape[0])
+    feat_map[diag_ind,diag_ind] = np.inf
+    feat_min = feat_map.min(dim=1).values
+    neighbor_dist = feat_min.mean()
 
-    T_num_samples = T.shape[0]
-    S_num_samples = S.shape[0]
-    mean_num_samples = np.mean([T_num_samples, S_num_samples])
-    D = cdist_torch(T, S, points_dim)
-    R = torch.squeeze(softargmin_rows_torch(D, t))
-    C = torch.squeeze(softargmin_rows_torch(torch.transpose(D, dim0=0, dim1=1), t))
-    C = torch.transpose(C, dim0=0, dim1=1)
-    B = torch.mul(R, C)
+    return COEFF * neighbor_dist + EPS
+
+
+
+def soft_BBS_loss_torch(S, T, temperature, points_dim=None, return_mat=False, transpose=None):
+    num_features = 64
+
+    T_num_samples = T.shape[1]
+    S_num_samples = S.shape[1]
+
+    mean_num_samples = np.mean([S_num_samples, T_num_samples])
+
+    D = cdist_torch( S, T, points_dim)
+    R = torch.squeeze(softargmin_rows_torch(D, temperature))
+    C = torch.squeeze(softargmin_rows_torch(D.T, temperature))
+    B = torch.mul(R, C.T)
     loss = torch.div(-torch.sum(B), mean_num_samples).view(1)
     if return_mat:
         return B
     else:
         return loss
 
-def my_softmax(x, eps=1e-12, dim=0):
-    x_exp = torch.exp(x - x.max())
-    x_exp_sum = torch.sum(x_exp, dim=dim, keepdim=True)
+def my_softmax(x, eps=1e-12):
+    x_exp = torch.exp(x - x.min())
+    x_exp_sum = torch.sum(x_exp, dim=1, keepdim=True)
     return x_exp/(x_exp_sum + eps)
 
 def softargmin_rows_torch(X, t, eps=1e-12):
     t = t.double()
     X = X.double()
-    weights = my_softmax(-X/t, eps=eps, dim=1)
+    weights = my_softmax(-X/t, eps=eps)
     return weights

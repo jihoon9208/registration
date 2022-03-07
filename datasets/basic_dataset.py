@@ -37,38 +37,5 @@ class BasicDataset(Dataset):
         logging.info(f"Resetting the data loader seed to {seed}")
         self.randg.seed(seed)
 
-    def sample_points(self, pts, num_points):
-        if pts.shape[0] > num_points:
-            pts = np.random.permutation(pts)[:num_points]
-        else:
-            pts = np.random.permutation(pts)
-        return pts
-
-    def apply_transform(self, pts, trans):
-        R = trans[:3, :3]
-        T = trans[:3, 3]
-        pts = pts @ R.T + T
-        return pts
-
-    def ground_truth_attention(self, p1, p2, trans):
-        
-        p1 = self.sample_points(p1, self.num_points)
-        p2 = self.sample_points(p2, self.num_points)
-
-        ideal_pts2 = self.apply_transform(p1, trans)    
-
-        nn = NearestNeighbors(n_neighbors=1).fit(p2)
-        distance, neighbors = nn.kneighbors(ideal_pts2)
-        neighbors1 = neighbors[distance < 0.3]
-        pcd1 = p2[neighbors1]
-        
-        # Search NN for each p2 in ideal_pt2
-        nn = NearestNeighbors(n_neighbors=1).fit(ideal_pts2)
-        distance, neighbors = nn.kneighbors(p2)
-        neighbors2 = neighbors[distance < 0.3]
-        pcd0 = p1[neighbors2]
-
-        return pcd0, pcd1, neighbors2, neighbors1
-
     def __len__(self):
         return len(self.files)

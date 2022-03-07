@@ -43,6 +43,7 @@ def make_data_loader(config, phase, batch_size, num_threads=0, shuffle=None):
         transform=t.Compose(transforms),
         random_scale=use_random_scale,
         random_rotation=use_random_rotation,
+        manual_seed=False,
         config=config)
 
     loader = torch.utils.data.DataLoader(
@@ -57,6 +58,7 @@ def make_data_loader(config, phase, batch_size, num_threads=0, shuffle=None):
     return loader
 
 
+# Predator github modified
 def get_datasets(config):
 
     if(config.dataset=='ThreeDMatchPairDataset'):
@@ -64,9 +66,10 @@ def get_datasets(config):
         info_val = load_obj(config.val_info)
         info_benchmark = load_obj(config.test_full_info)
 
-        train_set = ThreeDMatchPairDataset(info_train,config,data_augmentation=True)
-        val_set = ThreeDMatchPairDataset(info_val,config,data_augmentation=False)
-        benchmark_set = ThreeDMatchPairDataset(info_benchmark,config, data_augmentation=False)
+        train_set = ThreeDMatchPairDataset(info_train,config)
+        val_set = ThreeDMatchPairDataset(info_val,config)
+        benchmark_set = ThreeDMatchPairDataset(info_benchmark,config)
+
     elif(config.dataset == 'kitti'):
         train_set = KITTINMPairDataset(config,'train',data_augmentation=True)
         val_set = KITTINMPairDataset(config,'val',data_augmentation=False)

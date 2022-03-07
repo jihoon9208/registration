@@ -3,6 +3,7 @@ Loss functions
 Author: Shengyu Huang
 Last modified: 30.11.2020
 """
+from inspect import trace
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tools.utils import square_distance_loss
 from sklearn.metrics import precision_recall_fscore_support
+from tools.transforms import apply_transform
 
 class MetricLoss(nn.Module):
     """
@@ -27,7 +29,7 @@ class MetricLoss(nn.Module):
 
         self.safe_radius = configs.safe_radius 
         self.matchability_radius = configs.matchability_radius
-        self.pos_radius = configs.pos_radius # just to take care of the numeric precision
+        self.pos_radius = configs.voxel_size * configs.positive_pair_search_voxel_size_multiplier # just to take care of the numeric precision
     
     def get_circle_loss(self, coords_dist, feats_dist, ):
         """
@@ -62,7 +64,7 @@ class MetricLoss(nn.Module):
 
         return circle_loss
 
-    def get_recall(self,coords_dist,feats_dist):
+    def get_recall(self, coords_dist, feats_dist):
         """
         Get feature match recall, divided by number of true inliers
         """
@@ -74,7 +76,7 @@ class MetricLoss(nn.Module):
         recall = n_pred_pos / n_gt_pos
         return recall        
 
-    def forward(self, src_pcd, tgt_pcd, src_feats, tgt_feats, correspondence, rot, trans, scale = 1 ):
+    def forward(self, src_pcd, tgt_pcd, src_feats, tgt_feats, correspondence, trans, scale = 1 ):
         """
         Circle loss for metric learning, here we feed the positive pairs only
         Input:
@@ -85,8 +87,8 @@ class MetricLoss(nn.Module):
             src_feats:      [N, C]
             tgt_feats:      [M, C]
         """
-
-        src_pcd = (torch.matmul(rot,src_pcd.transpose(0,1))+trans).transpose(0,1)
+                    
+        src_pcd = apply_transform(src_pcd, trans)
 
         stats=dict()
 
@@ -95,6 +97,7 @@ class MetricLoss(nn.Module):
 
         #######################################
         # filter some of correspondence as we are using different radius for "overlap" and "correspondence"
+       
         c_dist = torch.norm(src_pcd[correspondence[:,0]] - tgt_pcd[correspondence[:,1]], dim = 1)
         c_select = c_dist < self.pos_radius - 0.001
         correspondence = correspondence[c_select]
@@ -120,6 +123,6 @@ class MetricLoss(nn.Module):
         ##################
 
         stats['circle_loss']= circle_loss
-        stats['recall']=recall
+        stats['recall']= recall
 
         return stats

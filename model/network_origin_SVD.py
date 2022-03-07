@@ -1,5 +1,4 @@
 import sys
-import logging
 from turtle import forward
 from matplotlib.transforms import Transform
 import torch
@@ -11,20 +10,21 @@ import torch.nn.functional as F
 import copy
 import MinkowskiEngine as ME
 import MinkowskiEngine.MinkowskiFunctional as MEF
-from torch_batch_svd import svd as fast_svd
-
+import teaserpp_python
 import open3d as o3d
 from scipy.spatial import cKDTree
 
 from model.resunet import SparseResNetFull, SparseResNetOver
-
-from tools.pointcloud import draw_registration_result
-from tools.model_util import soft_BBS_loss_torch, guess_best_alpha_torch, cdist_torch
-from tools.radius import compute_graph_nn, feature_matching
-from tools.transform_estimation import sparse_gaussian, axis_angle_to_rotation, rotation_to_axis_angle
-from lib.timer import random_triplet
-
+from lib.correspondence import find_correct_correspondence
+from tools.pointcloud import draw_registration_result, get_matching_indices, make_open3d_point_cloud
+from tools.model_util import soft_BBS_loss_torch, guess_best_alpha_torch, cdist_torch, square_dist_torch
+from tools.radius import compute_graph_nn
+from tools.transforms import sample_points
+from tools.utils import to_tsfm
+from model.common import get_norm
+from model.residual_block import get_block
 from model.attention import GCN, GCNOver
+import tools.transform_estimation as te
 
 sys.path.append("./lib/model_exc")
 
@@ -279,6 +279,211 @@ class DGCNN_over(nn.Module):
 
         return pcd_out0.squeeze(dim=0).transpose(1,0), pcd_out1.squeeze(dim=0).transpose(1,0)
 
+
+class EncoderDecoder(nn.Module):
+    """
+    A standard Encoder-Decoder architecture. Base for this and many
+    other models.
+    """
+
+    def __init__(self, encoder, decoder, src_embed, tgt_embed, generator):
+        super(EncoderDecoder, self).__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.src_embed = src_embed
+        self.tgt_embed = tgt_embed
+        self.generator = generator
+
+    def forward(self, src, tgt, src_mask, tgt_mask):
+        "Take in and process masked src and target sequences."
+        return self.decode(self.encode(src, src_mask), src_mask,
+                           tgt, tgt_mask)
+
+    def encode(self, src, src_mask):
+        return self.encoder(self.src_embed(src), src_mask)
+
+    def decode(self, memory, src_mask, tgt, tgt_mask):
+        return self.generator(self.decoder(self.tgt_embed(tgt), memory, src_mask, tgt_mask))
+
+
+class Generator(nn.Module):
+    def __init__(self, emb_dims):
+        super(Generator, self).__init__()
+        self.nn = nn.Sequential(nn.Linear(emb_dims, emb_dims // 2),
+                                nn.BatchNorm1d(emb_dims // 2),
+                                nn.ReLU(),
+                                nn.Linear(emb_dims // 2, emb_dims // 4),
+                                nn.BatchNorm1d(emb_dims // 4),
+                                nn.ReLU(),
+                                nn.Linear(emb_dims // 4, emb_dims // 8),
+                                nn.BatchNorm1d(emb_dims // 8),
+                                nn.ReLU())
+        self.proj_rot = nn.Linear(emb_dims // 8, 4)
+        self.proj_trans = nn.Linear(emb_dims // 8, 3)
+
+    def forward(self, x):
+        x = self.nn(x.max(dim=1)[0])
+        rotation = self.proj_rot(x)
+        translation = self.proj_trans(x)
+        rotation = rotation / torch.norm(rotation, p=2, dim=1, keepdim=True)
+        return rotation, translation
+
+
+class Encoder(nn.Module):
+    def __init__(self, layer, N):
+        super(Encoder, self).__init__()
+        self.layers = clones(layer, N)
+        self.norm = LayerNorm(layer.size)
+
+    def forward(self, x, mask):
+        for layer in self.layers:
+            x = layer(x, mask)
+        return self.norm(x)
+
+
+class Decoder(nn.Module):
+    "Generic N layer decoder with masking."
+
+    def __init__(self, layer, N):
+        super(Decoder, self).__init__()
+        self.layers = clones(layer, N)
+        self.norm = LayerNorm(layer.size)
+
+    def forward(self, x, memory, src_mask, tgt_mask):
+        for layer in self.layers:
+            x = layer(x, memory, src_mask, tgt_mask)
+        return self.norm(x)
+
+
+class LayerNorm(nn.Module):
+    def __init__(self, features, eps=1e-6):
+        super(LayerNorm, self).__init__()
+        self.a_2 = nn.Parameter(torch.ones(features))
+        self.b_2 = nn.Parameter(torch.zeros(features))
+        self.eps = eps
+
+    def forward(self, x):
+        mean = x.mean(-1, keepdim=True)
+        std = x.std(-1, keepdim=True)
+        return self.a_2 * (x - mean) / (std + self.eps) + self.b_2
+
+
+class SublayerConnection(nn.Module):
+    def __init__(self, size, dropout=None):
+        super(SublayerConnection, self).__init__()
+        self.norm = LayerNorm(size)
+
+    def forward(self, x, sublayer):
+        return x + sublayer(self.norm(x))
+
+
+class EncoderLayer(nn.Module):
+    def __init__(self, size, self_attn, feed_forward, dropout):
+        super(EncoderLayer, self).__init__()
+        self.self_attn = self_attn
+        self.feed_forward = feed_forward
+        self.sublayer = clones(SublayerConnection(size, dropout), 2)
+        self.size = size
+
+    def forward(self, x, mask):
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, mask))
+        return self.sublayer[1](x, self.feed_forward)
+
+
+class DecoderLayer(nn.Module):
+    "Decoder is made of self-attn, src-attn, and feed forward (defined below)"
+
+    def __init__(self, size, self_attn, src_attn, feed_forward, dropout):
+        super(DecoderLayer, self).__init__()
+        self.size = size
+        self.self_attn = self_attn
+        self.src_attn = src_attn
+        self.feed_forward = feed_forward
+        self.sublayer = clones(SublayerConnection(size, dropout), 3)
+
+    def forward(self, x, memory, src_mask, tgt_mask):
+        "Follow Figure 1 (right) for connections."
+        m = memory
+        x = self.sublayer[0](x, lambda x: self.self_attn(x, x, x, tgt_mask))
+        x = self.sublayer[1](x, lambda x: self.src_attn(x, m, m, src_mask))
+        return self.sublayer[2](x, self.feed_forward)
+
+
+class MultiHeadedAttention(nn.Module):
+    def __init__(self, h, d_model, dropout=0.1):
+        "Take in model size and number of heads."
+        super(MultiHeadedAttention, self).__init__()
+        assert d_model % h == 0
+        # We assume d_v always equals d_k
+        self.d_k = d_model // h
+        self.h = h
+        self.linears = clones(nn.Linear(d_model, d_model), 4)
+        self.attn = None
+        self.dropout = None
+
+    def forward(self, query, key, value, mask=None):
+        "Implements Figure 2"
+        if mask is not None:
+            # Same mask applied to all h heads.
+            mask = mask.unsqueeze(1)
+        nbatches = query.size(0)
+
+        # 1) Do all the linear projections in batch from d_model => h x d_k
+        query, key, value = \
+            [l(x).view(nbatches, -1, self.h, self.d_k).transpose(1, 2).contiguous()
+             for l, x in zip(self.linears, (query, key, value))]
+
+        # 2) Apply attention on all the projected vectors in batch.
+        x, self.attn = attention(query, key, value, mask=mask,
+                                 dropout=self.dropout)
+
+        # 3) "Concat" using a view and apply a final linear.
+        x = x.transpose(1, 2).contiguous() \
+            .view(nbatches, -1, self.h * self.d_k)
+        return self.linears[-1](x)
+
+
+class PositionwiseFeedForward(nn.Module):
+    "Implements FFN equation."
+
+    def __init__(self, d_model, d_ff, dropout=0.1):
+        super(PositionwiseFeedForward, self).__init__()
+        self.w_1 = nn.Linear(d_model, d_ff)
+        self.norm = nn.Sequential()  # nn.BatchNorm1d(d_ff)
+        self.w_2 = nn.Linear(d_ff, d_model)
+        self.dropout = None
+
+    def forward(self, x):
+        return self.w_2(self.norm(F.relu(self.w_1(x)).transpose(2, 1).contiguous()).transpose(2, 1).contiguous())
+
+class PointerTransform(nn.Module):
+    def __init__(self, config):
+        super(PointerTransform, self).__init__()
+        self.emb_dims = config.emb_dims
+        self.N = 1
+        self.dropout = config.dropout
+        self.ff_dims = config.ff_dims
+        self.n_heads = config.n_heads
+        c = copy.deepcopy
+        attn = MultiHeadedAttention(self.n_heads, self.emb_dims)
+        ff = PositionwiseFeedForward(self.emb_dims, self.ff_dims, self.dropout)
+        self.model = EncoderDecoder(Encoder(EncoderLayer(self.emb_dims, c(attn), c(ff), self.dropout), self.N),
+                                    Decoder(DecoderLayer(self.emb_dims, c(attn), c(attn), c(ff), self.dropout), self.N),
+                                    nn.Sequential(),
+                                    nn.Sequential(),
+                                    nn.Sequential())
+
+    def forward(self, src_feat, tgt_feat):
+        
+        src = src_feat.contiguous()
+        tgt = tgt_feat.contiguous()
+
+        tgt_embedding = self.model(src, tgt, None, None).contiguous()
+        src_embedding = self.model(tgt, src, None, None).contiguous()
+
+        return src_embedding, tgt_embedding
+
+
 class TNet(nn.Module):
     def __init__(self, config): 
         super(TNet, self).__init__()
@@ -302,6 +507,7 @@ class TNet(nn.Module):
         out = self.layer4(out)
 
         return out
+        
 
 class SVDHead(nn.Module):
     def __init__(self, config):
@@ -388,6 +594,21 @@ class SVDHead(nn.Module):
 
         t = torch.matmul(-r, src_weighted_mean) + src_corr_weighted_mean
 
+        """ gamma1 = torch.abs(gamma).sum(dim=1, keepdim=True)
+        gamma_norm = gamma / (gamma1+self.eps)
+        mean_src = (gamma_norm * sub_src).sum(dim=0, keepdim=True)
+        mean_tgt = (gamma_norm * sub_tgt).sum(dim=0, keepdim=True)
+        Sxy = torch.matmul( (sub_tgt - mean_tgt), gamma_norm * ( sub_src - mean_src).transpose(1,0))
+        Sxy = Sxy.cpu().double()
+        U, D, V = Sxy.svd()
+        #condition = D.max(dim=1)[0] / D.min(dim=1)[0]
+        S = torch.eye(3).repeat(1,1).double()
+        UV_det = U.det() * V.det()
+        S[2:3, 2:3] = UV_det.view(1,1)
+        svT = torch.matmul( S, V.transpose(0,1) )
+        R = torch.matmul( U, svT).float().to(device)
+        t = mean_tgt - torch.matmul( R, mean_src ) """
+
         return r, t.view(-1,3), src_corr, sel0, sel1
 
 
@@ -397,152 +618,47 @@ class PoseEstimator(ME.MinkowskiNetwork):
 
         self.config = config
         self.voxel_size = config.voxel_size
-        self.num_trial = config.num_trial
-        self.r_binsize = config.r_binsize
-        self.t_binsize = config.t_binsize
-        self.smoothing = True
-        self.kernel_size = 3
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.full_embed = EmbeddingFeatureFull(self.config)
-        #self.refine_model = EmbeddingFeatureOver(self.config)
+        self.over_embed = EmbeddingFeatureOver(self.config)
+        self.embed_pointer = PointerTransform(self.config)
         self.head = SVDHead(self.config)
         
-    def sample_correspondence(self, src, tgt, src_feat, tgt_feat):
-
-        pairs = feature_matching(src_feat, tgt_feat, mutual=False)
-        pairs_inv = feature_matching(tgt_feat, src_feat, mutual=False)
-        pairs = torch.cat([pairs, pairs_inv.roll(1, 1)], dim=0)
-
-        # sample random triplets
-        triplets = random_triplet(len(pairs), self.num_trial * 5)
-
-        # check geometric constraints
-        idx0 = pairs[triplets, 0]
-        idx1 = pairs[triplets, 1]
-        xyz0_sel = src[idx0].reshape(-1, 3, 3)
-        xyz1_sel = tgt[idx1].reshape(-1, 3, 3)
-        li = torch.norm(xyz0_sel - xyz0_sel.roll(1, 1), p=2, dim=2)
-        lj = torch.norm(xyz1_sel - xyz1_sel.roll(1, 1), p=2, dim=2)
-
-        triangle_check = torch.all(
-            torch.abs(li - lj) < 3 * self.voxel_size, dim=1
-        ).cpu()
-        dup_check = torch.logical_and(
-            torch.all(li > self.voxel_size * 1.5, dim=1),
-            torch.all(lj > self.voxel_size * 1.5, dim=1),
-        ).cpu()
-
-        triplets = triplets[torch.logical_and(triangle_check, dup_check)]
-
-        if triplets.shape[0] > self.num_trial:
-            idx = np.round(
-                np.linspace(0, triplets.shape[0] - 1, self.num_trial)
-            ).astype(int)
-            triplets = triplets[idx]
-
-        return pairs, triplets
-
+    
     def apply_transform(self, pts, trans):
         R = trans[:3, :3]
         T = trans[:3, 3]
         return pts @ R.T + T
 
-    def solve(self, xyz0, xyz1, pairs, triplets):
-        xyz0_sel = xyz0[pairs[triplets, 0]]
-        xyz1_sel = xyz1[pairs[triplets, 1]]
+    def find_pairs(self, F0, F1, len_batch):
 
-        # zero mean shift
-        xyz0_mean = xyz0_sel.mean(1, keepdim=True)
-        xyz1_mean = xyz1_sel.mean(1, keepdim=True)
-        xyz0_centered = xyz0_sel - xyz0_mean
-        xyz1_centered = xyz1_sel - xyz1_mean
+        feat1tree = cKDTree(F1)
+        dists, nn_inds = feat1tree.query(F0, k=32, n_jobs=-1)
 
-        # solve rotation
-        H = xyz1_centered.transpose(1, 2) @ xyz0_centered
-        U, D, V = fast_svd(H)
-        S = torch.eye(3).repeat(U.shape[0], 1, 1).to(U.device)
-        det = U.det() * V.det()
-        S[det < 0, -1, -1] = -1
-        Rs = U @ S @ V.transpose(1, 2)
-        angles = rotation_to_axis_angle(Rs)
-
-        # solve translation using centroid
-        xyz0_rotated = torch.bmm(Rs, xyz0_mean.permute(0, 2, 1)).squeeze(2)
-        t = xyz1_mean.squeeze(1) - xyz0_rotated
-
-        return angles, t
-
-    def vote(self, Rs, ts):
-        r_coord = torch.floor(Rs / self.r_binsize)
-        t_coord = torch.floor(ts / self.t_binsize)
-        coord = torch.cat(
-            [
-                torch.zeros(r_coord.shape[0]).unsqueeze(1).to(self.device),
-                r_coord,
-                t_coord,
-            ],
-            dim=1,
-        )
-        feat = torch.ones(coord.shape[0]).unsqueeze(1).to(self.device)
-        vote = ME.SparseTensor(
-            feat.float(),
-            coordinates=coord.int(),
-            quantization_mode=ME.SparseTensorQuantizationMode.UNWEIGHTED_SUM,
-        )
-        return vote
+        return nn_inds
     
-    def evaluate(self, vote):
-        max_index = vote.F.squeeze(1).argmax()
-        max_value = vote.C[max_index, 1:]
-        angle = (max_value[:3] + 0.5) * self.r_binsize
-        t = (max_value[3:] + 0.5) * self.t_binsize
-        R = axis_angle_to_rotation(angle)
-        return R, t
+    def evaluate_hit_ratio(self, xyz0, xyz1, T_gth, thresh=0.1):
+        xyz0 = self.apply_transform(xyz0, T_gth)
+        dist = np.sqrt(((xyz0 - xyz1)**2).sum(1) + 1e-6)
+        return (dist < thresh).float().mean().item()
 
-    #def forward(self, full_pcd0, full_pcd1, over_pcd0, over_pcd1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch, transform, pos_pairs):
-    def forward(self, full_pcd0, full_pcd1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch, transform, pos_pairs):
+    def forward(self, full_pcd0, full_pcd1, over_pcd0, over_pcd1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch, transform, pos_pairs):
         
+        xyz0 = full_pcd0.C[over_index0]
         full_out0, full_out1 = self.full_embed(full_pcd0, full_pcd1, inds_batch)
         #over_out0, over_out1 = self.over_embed(over_pcd0, over_pcd1, inds_batch)
+
+        """ full_out0[over_index0] += over_out1
+        full_out1[over_index1] += over_out0 """
 
         full_over_feat0 = full_out0[over_index0,:]
         full_over_feat1 = full_out1[over_index1,:]
         
         # Sample Correspondencs
-        pairs, combinations = self.sample_correspondence(over_xyz0, over_xyz1, full_over_feat0, full_over_feat1)
+        pairs, combinations = self.sample
 
-        try:
-            angles, ts = self.solve(over_xyz0, over_xyz1, pairs, combinations)
 
-            # rotation & translation voting
-            votes = self.vote(angles, ts)
+        rotation_ab, translation_ab, src_corr, src_sel, tgt_sel = self.head(full_out0, full_out1, \
+            full_pcd0.C[:,1:] * self.voxel_size, full_pcd1.C[:,1:] * self.voxel_size, transform )
 
-            # gaussian smoothing
-            if self.smoothing:
-                votes = sparse_gaussian(
-                    votes, kernel_size=self.kernel_size, dimension=6
-                )
-
-            # post processing
-            """ if self.refine_model is not None:
-                votes = self.refine_model(votes) """
-
-            R, t = self.evaluate(votes)
-            self.hspace = votes
-            T = torch.eye(4)
-            T[:3, :3] = R
-            T[:3, 3] = t
-            # empty cache
-            torch.cuda.empty_cache()
-
-        except Exception as e:
-            logging.exception(e)
-            """ import pdb
-            pdb.set_trace()
-            return torch.eye(4) """
-
-        """ rotation_ab, translation_ab, src_corr, src_sel, tgt_sel = self.head(full_out0, full_out1, \
-            full_pcd0.C[:,1:] * self.voxel_size, full_pcd1.C[:,1:] * self.voxel_size, transform ) """
-
-        return full_over_feat0, full_over_feat1, R, t
+        return full_out0, full_out1, rotation_ab, translation_ab, src_corr.transpose(1,0), src_sel, tgt_sel
 

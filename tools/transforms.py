@@ -15,14 +15,11 @@ from .pointcloud import get_matching_indices, make_open3d_point_cloud
 import open3d as o3d
 
 def decompose_rotation_translation(Ts):
-    Ts = Ts.float()
-    Rs = Ts[:, :3, :3]
-    ts = Ts[:, :3, 3]
+    
+    R = Ts[:3, :3]
+    T = Ts[:3, 3]
 
-    Rs.require_grad = False
-    ts.require_grad = False
-
-    return Rs, ts
+    return R, T
 
 def voxelize(point_cloud, voxel_size):
     # Random permutation (for random selection within voxel)

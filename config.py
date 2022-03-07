@@ -15,11 +15,12 @@ def str2bool(v):
 
 logging_arg = add_argument_group('Logging')
 logging_arg.add_argument('--out_dir', type=str, default='outputs')
+logging_arg.add_argument('--snapshot_dir', type=str, default='outputs/snapshot')
 
 trainer_arg = add_argument_group('Trainer')
 trainer_arg.add_argument('--trainer', type=str, default='RegistrationTrainer')
 trainer_arg.add_argument('--save_freq_epoch', type=int, default=1)
-trainer_arg.add_argument('--batch_size', type=int, default=2)
+trainer_arg.add_argument('--batch_size', type=int, default=6)
 trainer_arg.add_argument('--val_batch_size', type=int, default=1)
 
 # Metric learning loss
@@ -29,6 +30,7 @@ trainer_arg.add_argument('--neg_weight', type=float, default=1)
 trainer_arg.add_argument('--log_scale', type=float, default=24)
 trainer_arg.add_argument('--pos_radius', type=float, default=0.0375)
 trainer_arg.add_argument('--safe_radius', type=float, default=1)
+trainer_arg.add_argument('--overlap_radius', type=float, default=0.0375)
 trainer_arg.add_argument('--matchability_radius', type=float, default=0.05)
 trainer_arg.add_argument('--max_points', type=int, default=256)
 
@@ -38,7 +40,8 @@ trainer_arg.add_argument('--min_scale', type=float, default=0.8)
 trainer_arg.add_argument('--max_scale', type=float, default=1.2)
 trainer_arg.add_argument('--use_random_rotation', type=str2bool, default=True)
 trainer_arg.add_argument('--rotation_range', type=float, default=360)
-trainer_arg.add_argument('--num_points', type=int, default=2048)
+trainer_arg.add_argument('--num_points', type=int, default=4096)
+trainer_arg.add_argument('--sample_num_points', type=int, default=512)
 
 # Data loader configs
 trainer_arg.add_argument('--train_phase', type=str, default="train")
@@ -55,15 +58,25 @@ trainer_arg.add_argument('--hit_ratio_thresh', type=float, default=0.1)
 # dNetwork specific configurations
 dgf_arg = add_argument_group('Network')
 dgf_arg.add_argument('--model', type=str, default='ResUNetBN2C')
-dgf_arg.add_argument('--model_n_out', type=int, default=32, help='Feature dimension')
-dgf_arg.add_argument('--emb_dims', type=int, default=512, metavar='N',help='Dimension of embeddings')
+dgf_arg.add_argument('--sparse_dims', type=int, default=32, help='Feature dimension')
+dgf_arg.add_argument('--emb_dims', type=int, default=32, metavar='N',help='Dimension of embeddings')
+dgf_arg.add_argument('--dropout', type=float, default=0.0, metavar='N',
+                        help='Dropout ratio in transformer')
+dgf_arg.add_argument('--n_heads', type=int, default=4, metavar='N',
+                        help='Num of heads in multiheadedattention')
+dgf_arg.add_argument('--ff_dims', type=int, default=32, metavar='N',
+                        help='Num of dimensions of fc in transformer')
 dgf_arg.add_argument('--conv1_kernel_size', type=int, default=5)
 dgf_arg.add_argument('--conv2_kernel_size', type=int, default=3)
 dgf_arg.add_argument('--alpha_factor', type=float, default=4)
 dgf_arg.add_argument('--eps', type=float, default=1e-12)
 dgf_arg.add_argument('--dist_type', type=str, default='L2')
 dgf_arg.add_argument('--best_val_metric', type=str, default='feat_match_ratio')
-dgf_arg.add_argument('--k_nn_geof', default=10, type=int, help='number of neighbors to describe the local geometry')
+dgf_arg.add_argument('--k_nn_geof', default=32, type=int, help='number of neighbors to describe the local geometry')
+
+dgf_arg.add_argument('--num_trial', default=100000, type=int)
+dgf_arg.add_argument('--r_binsize', default=0.02, type=float)
+dgf_arg.add_argument('--t_binsize', default=0.02, type=float)
 
 # Attention specific configurations
 att_arg = add_argument_group('Attention')
@@ -91,7 +104,7 @@ opt_arg.add_argument(
 misc_arg = add_argument_group('Misc')
 misc_arg.add_argument('--use_gpu', type=str2bool, default=True)
 misc_arg.add_argument('--verbose', type=str2bool, default=True)
-misc_arg.add_argument('--verbose_freq', type=int, default=500)
+misc_arg.add_argument('--verbose_freq', type=int, default=100)
 misc_arg.add_argument('--weights', type=str, default=None)
 misc_arg.add_argument('--weights_dir', type=str, default=None)
 misc_arg.add_argument('--resume', type=str, default=None)
@@ -108,15 +121,16 @@ misc_arg.add_argument(
 
 data_arg = add_argument_group('Data')
 data_arg.add_argument('--dataset', type=str, default='ThreeDMatchPairDataset')
-data_arg.add_argument('--train_info', type=str, default='./datasets/split/indoor/train_info.pkl')
-data_arg.add_argument('--val_info', type=str, default='./datasets/split/indoor/val_info.pkl')
-data_arg.add_argument('--test_full_info', type=str, default='./datasets/split/indoor/3DMatch.pkl')
-data_arg.add_argument('--test_low_info', type=str, default='./datasets/split/indoor/3DLoMatch.pkl')
+data_arg.add_argument('--train_info', type=str, default='./datasets/split/over/train_info.pkl')
+data_arg.add_argument('--val_info', type=str, default='./datasets/split/over/val_info.pkl')
+data_arg.add_argument('--test_full_info', type=str, default='./datasets/split/over/3DMatch.pkl')
+data_arg.add_argument('--test_low_info', type=str, default='./datasets/split/over/3DLoMatch.pkl')
 data_arg.add_argument('--augment_noise', type=float, default=0.005)
 
 data_arg.add_argument('--voxel_size', type=float, default=0.025)
 data_arg.add_argument(
-    '--threed_match_dir', type=str, default="./data/indoor")
+    '--threed_match_dir', type=str, default="../Datasets/3dmatch/threedmatch")
+    #'--threed_match_dir', type=str, default="./data/indoor")
 data_arg.add_argument(
     '--kitti_root', type=str, default="../datasets/kitti/")
 data_arg.add_argument(

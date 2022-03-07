@@ -1,5 +1,13 @@
 import math
 import time
+import torch
+
+
+def random_triplet(high, size):
+    triplets = torch.randint(low=0, high=high, size=(int(size * 1.2), 3))
+    local_dup_check = (triplets - triplets.roll(1, 1) != 0).all(dim=1)
+    triplets = triplets[local_dup_check]
+    return triplets
 
 
 class AverageMeter(object):

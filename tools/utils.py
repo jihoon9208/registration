@@ -1,4 +1,5 @@
 import torch
+import os
 import pickle
 import numpy as np
 import open3d as o3d
@@ -22,7 +23,7 @@ def square_distance(src, dst):
     dist = torch.clamp(dist, min=1e-12, max=None)
     return dist
 
-def square_distance_loss(src, dst):
+def square_distance_loss(src, dst, normalised = False):
     """
     Calculate Euclid distance between each two points.
 
@@ -37,8 +38,12 @@ def square_distance_loss(src, dst):
     _, M, _ = dst.shape
     
     dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    dist += torch.sum(src ** 2, -1)[:, :, None]
-    dist += torch.sum(dst ** 2, -1)[:, None, :]
+    if(normalised):
+        dist += 2
+    else:
+        dist += torch.sum(src ** 2, -1)[:, :, None]
+        dist += torch.sum(dst ** 2, -1)[:, None, :]
+        
     dist = torch.clamp(dist, min=1e-12, max=None)
     return dist
 
@@ -107,6 +112,9 @@ def to_tensor(x):
         return torch.from_numpy(x)
     else:
         raise ValueError(f'Can not convert to torch tensor, {x}')
+
+
+
 def to_array(tensor):
     """
     Conver tensor to array
@@ -124,6 +132,21 @@ def to_o3d_pcd(xyz):
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(to_array(xyz))
     return pcd
+
+class Logger:
+    def __init__(self, path):
+        self.path = path
+
+        os.makedirs(self.path, exist_ok=True)
+
+        self.fw = open(self.path+'/log','a')
+
+    def write(self, text):
+        self.fw.write(text)
+        self.fw.flush()
+
+    def close(self):
+        self.fw.close()
 
 def get_correspondences(src_pcd, tgt_pcd, trans, search_voxel_size, K=None):
     src_pcd.transform(trans)

@@ -324,22 +324,77 @@ class PointNetFeaturePropagation(ME.MinkowskiNetwork):
         return new_points
 
 class GCN(ME.MinkowskiNetwork):
-    def __init__(self):
+    def __init__(self, config, droupout=0.2):
         ME.MinkowskiNetwork.__init__(self, D=3)
 
-        self.SelfAttention = GraphAttentionConvLayer(128, 0.8, 32, 256 + 3, [256, 256, 512], D=3)
+        self.SelfAttention1 = GraphAttentionConvLayer(2048, 0.1, 32, 32 + 3, [32, 32, 64], D=3)
+        self.SelfAttention2 = GraphAttentionConvLayer(1024, 0.2, 32, 64 + 3, [64, 64, 128], D=3)
+        self.SelfAttention3 = GraphAttentionConvLayer(512, 0.4, 32, 128 + 3, [128, 128, 256], D=3)
+        self.SelfAttention4 = GraphAttentionConvLayer(256, 0.8, 32, 256 + 3, [256, 256, 512], D=3)
+
         self.CrossAttention = AttentionalPropagation(512, 4)
-        self.Interpolation = PointNetFeaturePropagation(768, [256, 256])
 
-    def forward(self, xyz1, xyz2, points1, points2):
+        self.Interpolation4 = PointNetFeaturePropagation(768, [256, 256])
+        self.Interpolation3 = PointNetFeaturePropagation(384, [256, 256])
+        self.Interpolation2 = PointNetFeaturePropagation(320, [256, 128])
+        self.Interpolation1 = PointNetFeaturePropagation(160, [128, 128, 128])
+
+        self.conv1 = nn.Conv1d(128, 128, 1)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.drop1 = nn.Dropout(droupout)
+        self.conv2 = nn.Conv1d(128, 32, 1)
+
+    def forward(self, xyz1, points1):
+
+        xyz1 = xyz1.transpose(0,1)[None,:]
+        points1 = points1.transpose(0,1)[None,:]
         
-        new_xyz1, new_points1 = self.SelfAttention(xyz1, points1)
-        new_xyz2, new_points2 = self.SelfAttention(xyz2, points2)
+        new_xyz1, new_points1 = self.SelfAttention1(xyz1, points1)
+        new_xyz2, new_points2 = self.SelfAttention2(new_xyz1, new_points1)
+        new_xyz3, new_points3 = self.SelfAttention3(new_xyz2, new_points2)
+        new_xyz4, new_points4 = self.SelfAttention4(new_xyz3, new_points3)
 
-        new_points1 = new_points1 + self.CrossAttention(new_points1, new_points2)
-        new_points2 = new_points2 + self.CrossAttention(new_points2, new_points1)
+        new_points3 = self.Interpolation4(new_xyz3, new_xyz4, new_points3, new_points4)
+        new_points2 = self.Interpolation3(new_xyz2, new_xyz3, new_points2, new_points3)
+        new_points1 = self.Interpolation2(new_xyz1, new_xyz2, new_points1, new_points2)
+        new_points0 = self.Interpolation1(xyz1, new_xyz1, points1, new_points1)
 
-        new_points1 = self.Interpolation(xyz1, new_xyz1, points1, new_points1)
-        new_points2 = self.Interpolation(xyz2, new_xyz2, points2, new_points2)
+        x = self.drop1(F.relu(self.bn1(self.conv1(new_points0))))
+        x = self.conv2(x)
+        x = F.log_softmax(x, dim=1)
+        x = x.permute(0, 2, 1)
+ 
+        return x.squeeze(dim=0)
+
+class GCNOver(ME.MinkowskiNetwork):
+    def __init__(self, config, droupout=0.2):
+        ME.MinkowskiNetwork.__init__(self, D=3)
+
+        self.SelfAttention1 = GraphAttentionConvLayer(128, 0.1, 32, 32 + 3, [32, 32, 64], D=3)
+        self.SelfAttention2 = GraphAttentionConvLayer(64, 0.2, 32, 64 + 3, [64, 64, 128], D=3)
+
+        self.Interpolation2 = PointNetFeaturePropagation(192, [256, 128])
+        self.Interpolation1 = PointNetFeaturePropagation(160, [128, 128, 128])
+
+        self.conv1 = nn.Conv1d(128, 128, 1)
+        self.bn1 = nn.BatchNorm1d(128)
+        self.drop1 = nn.Dropout(droupout)
+        self.conv2 = nn.Conv1d(128, 32, 1)
+
+    def forward(self, xyz1, points1):
+
+        xyz1 = xyz1.transpose(0,1)[None,:]
+        points1 = points1.transpose(0,1)[None,:]
         
-        return new_points1, new_points2
+        new_xyz1, new_points1 = self.SelfAttention1(xyz1, points1)
+        new_xyz2, new_points2 = self.SelfAttention2(new_xyz1, new_points1)
+
+        new_points1 = self.Interpolation2(new_xyz1, new_xyz2, new_points1, new_points2)
+        new_points0 = self.Interpolation1(xyz1, new_xyz1, points1, new_points1)
+
+        x = self.drop1(F.relu(self.bn1(self.conv1(new_points0))))
+        x = self.conv2(x)
+        x = F.log_softmax(x, dim=1)
+        x = x.permute(0, 2, 1)
+ 
+        return x.squeeze(dim=0)
