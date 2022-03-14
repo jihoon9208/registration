@@ -11,7 +11,7 @@ import torch.nn.functional as F
 
 def transform_point_cloud(point_cloud, rotation, translation):
     
-    return point_cloud @ rotation + translation
+    return point_cloud @ rotation.T + translation
 
 def transform_point_cloud0(point_cloud, rotation, translation):
     

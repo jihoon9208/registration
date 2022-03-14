@@ -94,7 +94,7 @@ opt_arg.add_argument('--sgd_dampening', type=float, default=0.1)
 opt_arg.add_argument('--adam_beta1', type=float, default=0.9)
 opt_arg.add_argument('--adam_beta2', type=float, default=0.999)
 opt_arg.add_argument('--weight_decay', type=float, default=1e-4)
-opt_arg.add_argument('--iter_size', type=int, default=1, help='accumulate gradient')
+opt_arg.add_argument('--iter_size', type=int, default=2, help='accumulate gradient')
 opt_arg.add_argument('--bn_momentum', type=float, default=0.05)
 opt_arg.add_argument('--exp_gamma', type=float, default=0.99)
 opt_arg.add_argument('--scheduler', type=str, default='ExpLR')
@@ -129,7 +129,7 @@ data_arg.add_argument('--augment_noise', type=float, default=0.005)
 
 data_arg.add_argument('--voxel_size', type=float, default=0.025)
 data_arg.add_argument(
-    '--threed_match_dir', type=str, default="../Datasets/3dmatch/threedmatch")
+    '--threed_match_dir', type=str, default="../datasets/3dmatch/threedmatch")
     #'--threed_match_dir', type=str, default="./data/indoor")
 data_arg.add_argument(
     '--kitti_root', type=str, default="../datasets/kitti/")

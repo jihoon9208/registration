@@ -90,7 +90,7 @@ class MetricLoss(nn.Module):
                     
         src_pcd = apply_transform(src_pcd, trans)
 
-        stats=dict()
+        stats = dict()
 
         src_idx = list(set(correspondence[:,0].int().tolist()))
         tgt_idx = list(set(correspondence[:,1].int().tolist()))
@@ -123,6 +123,8 @@ class MetricLoss(nn.Module):
         ##################
 
         stats['circle_loss']= circle_loss
-        stats['recall']= recall
+        stats['feat_match_ratio']= recall
 
         return stats
+
+

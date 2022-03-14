@@ -327,10 +327,10 @@ class GCN(ME.MinkowskiNetwork):
     def __init__(self, config, droupout=0.2):
         ME.MinkowskiNetwork.__init__(self, D=3)
 
-        self.SelfAttention1 = GraphAttentionConvLayer(2048, 0.1, 32, 32 + 3, [32, 32, 64], D=3)
-        self.SelfAttention2 = GraphAttentionConvLayer(1024, 0.2, 32, 64 + 3, [64, 64, 128], D=3)
-        self.SelfAttention3 = GraphAttentionConvLayer(512, 0.4, 32, 128 + 3, [128, 128, 256], D=3)
-        self.SelfAttention4 = GraphAttentionConvLayer(256, 0.8, 32, 256 + 3, [256, 256, 512], D=3)
+        self.SelfAttention1 = GraphAttentionConvLayer(1024, 0.1, 32, 32 + 3, [32, 32, 64], D=3)
+        self.SelfAttention2 = GraphAttentionConvLayer(256, 0.2, 32, 64 + 3, [64, 64, 128], D=3)
+        self.SelfAttention3 = GraphAttentionConvLayer(64, 0.4, 32, 128 + 3, [128, 128, 256], D=3)
+        self.SelfAttention4 = GraphAttentionConvLayer(16, 0.8, 32, 256 + 3, [256, 256, 512], D=3)
 
         self.CrossAttention = AttentionalPropagation(512, 4)
 

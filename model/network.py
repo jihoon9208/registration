@@ -13,10 +13,8 @@ import MinkowskiEngine as ME
 import MinkowskiEngine.MinkowskiFunctional as MEF
 from torch_batch_svd import svd as fast_svd
 
-import open3d as o3d
-from scipy.spatial import cKDTree
-
 from model.resunet import SparseResNetFull, SparseResNetOver
+from model.simpleunet import SimpleNet
 
 from tools.pointcloud import draw_registration_result
 from tools.model_util import soft_BBS_loss_torch, guess_best_alpha_torch, cdist_torch
@@ -404,7 +402,10 @@ class PoseEstimator(ME.MinkowskiNetwork):
         self.kernel_size = 3
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.full_embed = EmbeddingFeatureFull(self.config)
-        #self.refine_model = EmbeddingFeatureOver(self.config)
+        self.refine_model = SimpleNet (
+            conv1_kernel_size=config.conv1_kernel_size,
+            D=6).cuda()
+
         self.head = SVDHead(self.config)
         
     def sample_correspondence(self, src, tgt, src_feat, tgt_feat):
@@ -502,6 +503,9 @@ class PoseEstimator(ME.MinkowskiNetwork):
     #def forward(self, full_pcd0, full_pcd1, over_pcd0, over_pcd1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch, transform, pos_pairs):
     def forward(self, full_pcd0, full_pcd1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch, transform, pos_pairs):
         
+        global Rotation
+        global translate
+        
         full_out0, full_out1 = self.full_embed(full_pcd0, full_pcd1, inds_batch)
         #over_out0, over_out1 = self.over_embed(over_pcd0, over_pcd1, inds_batch)
 
@@ -511,38 +515,37 @@ class PoseEstimator(ME.MinkowskiNetwork):
         # Sample Correspondencs
         pairs, combinations = self.sample_correspondence(over_xyz0, over_xyz1, full_over_feat0, full_over_feat1)
 
-        try:
-            angles, ts = self.solve(over_xyz0, over_xyz1, pairs, combinations)
+      
+        angles, ts = self.solve(over_xyz0, over_xyz1, pairs, combinations)
 
-            # rotation & translation voting
-            votes = self.vote(angles, ts)
+        # rotation & translation voting
+        votes = self.vote(angles, ts)
 
-            # gaussian smoothing
-            if self.smoothing:
-                votes = sparse_gaussian(
-                    votes, kernel_size=self.kernel_size, dimension=6
-                )
+        # gaussian smoothing
+        if self.smoothing:
+            votes = sparse_gaussian(
+                votes, kernel_size=self.kernel_size, dimension=6
+            )
 
-            # post processing
-            """ if self.refine_model is not None:
-                votes = self.refine_model(votes) """
+        # post processing
+        if self.refine_model is not None:
+            votes = self.refine_model(votes)
 
-            R, t = self.evaluate(votes)
-            self.hspace = votes
-            T = torch.eye(4)
-            T[:3, :3] = R
-            T[:3, 3] = t
-            # empty cache
-            torch.cuda.empty_cache()
+        Rotation, translate = self.evaluate(votes)
+        self.hspace = votes
+        Transform = torch.eye(4)
+        Transform[:3, :3] = Rotation
+        Transform[:3, 3] = translate
+        # empty cache
+        torch.cuda.empty_cache()
 
-        except Exception as e:
-            logging.exception(e)
-            """ import pdb
-            pdb.set_trace()
-            return torch.eye(4) """
+   
+        """ import pdb
+        pdb.set_trace()
+        return torch.eye(4) """
 
         """ rotation_ab, translation_ab, src_corr, src_sel, tgt_sel = self.head(full_out0, full_out1, \
             full_pcd0.C[:,1:] * self.voxel_size, full_pcd1.C[:,1:] * self.voxel_size, transform ) """
 
-        return full_over_feat0, full_over_feat1, R, t
+        return full_over_feat0, full_over_feat1, Rotation, translate
 

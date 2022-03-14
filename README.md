@@ -15,7 +15,7 @@ pip install -U git+https://github.com/NVIDIA/MinkowskiEngine -v --no-deps --inst
 
 conda install -c anaconda boost; conda install -c omnia eigen3; conda install eigen; conda install -c r libiconv
 
-conda install faiss-gpu cudatoolkit=10.0 -c pytorch
+conda install faiss-gpu cudatoolkit=11.3 -c pytorch
 sudo apt-get install libopenblas-dev
 sudo apt-get install libomp-dev
 

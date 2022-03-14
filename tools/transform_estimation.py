@@ -225,7 +225,7 @@ def gaussianNd(kernel_size=5, dimension=3):
     dim = [kernel_size] * dimension
     siz = torch.LongTensor(dim)
     sig_sq = (siz.float() / 2 / 2.354).pow(2)
-    siz2 = (siz - 1) // 2
+    siz2 = torch.div((siz - 1) , 2, rounding_mode="floor")
 
     axis = torch.meshgrid(
         [torch.arange(-siz2[i], siz2[i] + 1) for i in range(siz.shape[0])]
