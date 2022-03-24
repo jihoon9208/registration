@@ -4,25 +4,6 @@ import pickle
 import numpy as np
 import open3d as o3d
 
-def square_distance(src, dst):
-    """
-    Calculate Euclid distance between each two points.
-    Input:
-        src: source points, [B, N, C]
-        dst: target points, [B, M, C]
-    Output:
-        dist: per-point square distance, [B, N, M]
-    """
-    
-    B, N, _ = src.shape
-    _, M, _ = dst.shape
-    
-    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    dist += torch.sum(src ** 2, -1).view(B, N, 1)
-    dist += torch.sum(dst ** 2, -1).view(B, 1, M)
-    dist = torch.clamp(dist, min=1e-12, max=None)
-    return dist
-
 def square_distance_loss(src, dst, normalised = False):
     """
     Calculate Euclid distance between each two points.
@@ -46,28 +27,6 @@ def square_distance_loss(src, dst, normalised = False):
         
     dist = torch.clamp(dist, min=1e-12, max=None)
     return dist
-
-def index_points(points, idx):
-    """
-    Input:
-        points: input points data, [B, N, C]
-        idx: sample index data, [B, S]
-    Return:
-        new_points:, indexed points data, [B, S, C]
-    """
-
-    device = points.device
-    B = points.shape[0]
-    view_shape = list(idx.shape)
-    view_shape[1:] = [1] * (len(view_shape) - 1)
-    repeat_shape = list(idx.shape)
-    repeat_shape[0] = 1
-    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
-    new_points = points[batch_indices, idx, :]
-
-    del batch_indices, repeat_shape, view_shape
-
-    return new_points
 
 def validate_gradient(model):
     """

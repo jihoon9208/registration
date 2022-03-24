@@ -74,7 +74,10 @@ class MetricLoss(nn.Module):
         sel_dist = torch.gather(coords_dist,dim=-1,index=sel_idx[:,None])[pos_mask.sum(-1)>0]
         n_pred_pos = (sel_dist < self.pos_radius ).float().sum()
         recall = n_pred_pos / n_gt_pos
-        return recall        
+        return recall     
+
+    
+
 
     def forward(self, src_pcd, tgt_pcd, src_feats, tgt_feats, correspondence, trans, scale = 1 ):
         """
@@ -118,6 +121,7 @@ class MetricLoss(nn.Module):
         # get FMR and circle loss
         ##############################
         recall = self.get_recall(coords_dist, feats_dist)
+        #self.get_recall()
         circle_loss = self.get_circle_loss(coords_dist, feats_dist)
 
         ##################

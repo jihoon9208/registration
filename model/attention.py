@@ -5,11 +5,49 @@ import torch.nn as nn
 import torch.nn.functional as F
 from copy import deepcopy
 import gc
-from tools.utils import square_distance, index_points
+
 import MinkowskiEngine as ME
 
+def square_distance(src, dst):
+    """
+    Calculate Euclid distance between each two points.
+    Input:
+        src: source points, [B, N, C]
+        dst: target points, [B, M, C]
+    Output:
+        dist: per-point square distance, [B, N, M]
+    """
     
+    B, N, _ = src.shape
+    _, M, _ = dst.shape
+    
+    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
+    dist += torch.sum(src ** 2, -1).view(B, N, 1)
+    dist += torch.sum(dst ** 2, -1).view(B, 1, M)
+    dist = torch.clamp(dist, min=1e-12, max=None)
+    return dist
 
+def index_points(points, idx):
+    """
+    Input:
+        points: input points data, [B, N, C]
+        idx: sample index data, [B, S]
+    Return:
+        new_points:, indexed points data, [B, S, C]
+    """
+
+    device = points.device
+    B = points.shape[0]
+    view_shape = list(idx.shape)
+    view_shape[1:] = [1] * (len(view_shape) - 1)
+    repeat_shape = list(idx.shape)
+    repeat_shape[0] = 1
+    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
+    new_points = points[batch_indices, idx, :]
+
+    del batch_indices, repeat_shape, view_shape
+
+    return new_points
     
 def farthest_point_sample(xyz, npoint):
     """
@@ -327,7 +365,7 @@ class GCN(ME.MinkowskiNetwork):
     def __init__(self, config, droupout=0.2):
         ME.MinkowskiNetwork.__init__(self, D=3)
 
-        self.SelfAttention1 = GraphAttentionConvLayer(1024, 0.1, 32, 32 + 3, [32, 32, 64], D=3)
+        self.SelfAttention1 = GraphAttentionConvLayer(1024, 0.1, 32, 1 + 3, [32, 32, 64], D=3)
         self.SelfAttention2 = GraphAttentionConvLayer(256, 0.2, 32, 64 + 3, [64, 64, 128], D=3)
         self.SelfAttention3 = GraphAttentionConvLayer(64, 0.4, 32, 128 + 3, [128, 128, 256], D=3)
         self.SelfAttention4 = GraphAttentionConvLayer(16, 0.8, 32, 256 + 3, [256, 256, 512], D=3)
@@ -337,7 +375,7 @@ class GCN(ME.MinkowskiNetwork):
         self.Interpolation4 = PointNetFeaturePropagation(768, [256, 256])
         self.Interpolation3 = PointNetFeaturePropagation(384, [256, 256])
         self.Interpolation2 = PointNetFeaturePropagation(320, [256, 128])
-        self.Interpolation1 = PointNetFeaturePropagation(160, [128, 128, 128])
+        self.Interpolation1 = PointNetFeaturePropagation(129, [128, 128, 128])
 
         self.conv1 = nn.Conv1d(128, 128, 1)
         self.bn1 = nn.BatchNorm1d(128)
@@ -356,39 +394,6 @@ class GCN(ME.MinkowskiNetwork):
 
         new_points3 = self.Interpolation4(new_xyz3, new_xyz4, new_points3, new_points4)
         new_points2 = self.Interpolation3(new_xyz2, new_xyz3, new_points2, new_points3)
-        new_points1 = self.Interpolation2(new_xyz1, new_xyz2, new_points1, new_points2)
-        new_points0 = self.Interpolation1(xyz1, new_xyz1, points1, new_points1)
-
-        x = self.drop1(F.relu(self.bn1(self.conv1(new_points0))))
-        x = self.conv2(x)
-        x = F.log_softmax(x, dim=1)
-        x = x.permute(0, 2, 1)
- 
-        return x.squeeze(dim=0)
-
-class GCNOver(ME.MinkowskiNetwork):
-    def __init__(self, config, droupout=0.2):
-        ME.MinkowskiNetwork.__init__(self, D=3)
-
-        self.SelfAttention1 = GraphAttentionConvLayer(128, 0.1, 32, 32 + 3, [32, 32, 64], D=3)
-        self.SelfAttention2 = GraphAttentionConvLayer(64, 0.2, 32, 64 + 3, [64, 64, 128], D=3)
-
-        self.Interpolation2 = PointNetFeaturePropagation(192, [256, 128])
-        self.Interpolation1 = PointNetFeaturePropagation(160, [128, 128, 128])
-
-        self.conv1 = nn.Conv1d(128, 128, 1)
-        self.bn1 = nn.BatchNorm1d(128)
-        self.drop1 = nn.Dropout(droupout)
-        self.conv2 = nn.Conv1d(128, 32, 1)
-
-    def forward(self, xyz1, points1):
-
-        xyz1 = xyz1.transpose(0,1)[None,:]
-        points1 = points1.transpose(0,1)[None,:]
-        
-        new_xyz1, new_points1 = self.SelfAttention1(xyz1, points1)
-        new_xyz2, new_points2 = self.SelfAttention2(new_xyz1, new_points1)
-
         new_points1 = self.Interpolation2(new_xyz1, new_xyz2, new_points1, new_points2)
         new_points0 = self.Interpolation1(xyz1, new_xyz1, points1, new_points1)
 

@@ -1,15 +1,19 @@
 
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
-import numpy.matlib
+
 import faiss
 import faiss.contrib.torch_utils
 import numpy as np
+import numpy.matlib as npm
 import torch
 from faiss.contrib.torch_utils import (
     swig_ptr_from_FloatTensor,
     swig_ptr_from_IndicesTensor,
 )
+
+res = faiss.StandardGpuResources()
+
 
 #------------------------------------------------------------------------------
 def compute_graph_nn(xyz, k_nn):
@@ -21,17 +25,12 @@ def compute_graph_nn(xyz, k_nn):
     distances, neighbors = nn.kneighbors(xyz)
     neighbors = neighbors[:, 1:]
     distances = distances[:, 1:]
-    source = np.matlib.repmat(range(0, num_ver), k_nn, 1).flatten(order='F')
+    source = npm.repmat(range(0, num_ver), k_nn, 1).flatten(order='F')
     #save the graph
     graph["source"] = source.flatten().astype('int64')
     graph["target"] = neighbors.flatten().astype('int64')
     graph["distances"] = distances.flatten().astype('float32')
     return graph
-
-
-
-res = faiss.StandardGpuResources()
-
 
 def _hash(arr, M=None):
     if isinstance(arr, np.ndarray):

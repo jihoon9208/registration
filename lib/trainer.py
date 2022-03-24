@@ -20,8 +20,8 @@ from tools.pointcloud import draw_registration_result, make_open3d_point_cloud
 #from model import load_model
 import model
 from tools.file import ensure_dir
-from tools.utils import validate_gradient, to_array, to_tsfm, Logger
-from tools.model_util import npmat2euler, transform_point_cloud, transform_point_cloud0 ,cdist_torch
+from tools.utils import validate_gradient, to_array, to_tsfm, Logger, to_tensor
+from tools.model_util import npmat2euler, rotationMatrixToEulerAngles,transform_point_cloud, transform_point_cloud0 ,cdist_torch
 from tools.transforms import apply_transform, decompose_rotation_translation
 
 from lib.timer import Timer, AverageMeter
@@ -113,8 +113,11 @@ class TrainerInit:
                 model.load_state_dict(state['state_dict'])
                 self.scheduler.load_state_dict(state['scheduler'])
                 self.optimizer.load_state_dict(state['optimizer'])
-                self.best_loss = state['best_loss']
-                self.best_recall = state['best_recall']
+                self.best_loss = state['best_val_loss']
+                self.best_val = state['best_val']
+                self.best_val_metric = state['best_val_metric']
+                self.best_val_epoch = state['best_val_epoch']
+
             else:
                 raise ValueError(f"=> no checkpoint found at '{config.resume}'")
 
@@ -124,14 +127,15 @@ class TrainerInit:
         """
         # Baseline random feature performance
         if self.test_valid:
-            """ with torch.no_grad():
+            with torch.no_grad():
                 val_dict = self.inference_one_epoch(0, 'val')
 
             for k, v in val_dict.items():
-                #self.writer.add_scalar(f'val/{k}', v, 0 )
-                print(k, v.avg) """
+                self.writer.add_scalar(f'val/{k}', v.avg, 0 )
+                print(k, v.avg)
         
         for epoch in range(self.start_epoch, self.max_epoch + 1):
+
             lr = self.scheduler.get_lr()
             logging.info(f" Epoch: {epoch}, LR: {lr}")
             #with torch.autograd.set_detect_anomaly(True):
@@ -152,14 +156,14 @@ class TrainerInit:
 
                 if self.best_val < val_dict[self.best_val_metric].avg :
                     logging.info(
-                        f'Saving the best val model with {self.best_val_metric}: {val_dict[self.best_val_metric]}'
+                        f'Saving the best val model with {self.best_val_metric}: {val_dict[self.best_val_metric].avg}'
                     )
                     self.best_val = val_dict[self.best_val_metric].avg
                     self.best_val_epoch = epoch
                     self._save_checkpoint(epoch, 'best_val_checkpoint')
                 else:
                     logging.info(
-                        f'Current best val model with {self.best_val_metric}: {self.best_recall} at epoch {self.best_val_epoch}'
+                        f'Current best val model with {self.best_val_metric}: {self.best_val} at epoch {self.best_val_epoch}'
                     )
 
     def eval(self):
@@ -233,23 +237,18 @@ class RegistrationTrainer(TrainerInit):
 
         src_batch_C, src_batch_F = ME.utils.sparse_collate(src_coord, src_feat)
         tgt_batch_C, tgt_batch_F = ME.utils.sparse_collate(tgt_coord, tgt_feat)
-    
-
-        pcd0_xyz = input_dict['pcd0'].to(self.device)
-        pcd1_xyz = input_dict['pcd1'].to(self.device)
         
-        transform_ab = torch.from_numpy(input_dict['T_gt']).to(self.device)
+        transform_ab = torch.from_numpy(input_dict['T_gt'].astype(np.float32))
         eulers_ab = torch.from_numpy(input_dict['Euler_gt'])
 
-        pos_pairs = input_dict['pos_pair']
         over_correspondences = input_dict['over_correspondences']
 
         inds_batch = input_dict['len_batch']
         
+        #full_xyz0, full_xyz1 = input_dict['pcd0'], input_dict['pcd1']
         over_xyz0 , over_xyz1 = input_dict['pcd0_over'].to(self.device), input_dict['pcd1_over'].to(self.device)
         over_index0, over_index1 = input_dict['over_index0'].int().tolist(), input_dict['over_index1'].int().tolist()
                     
-        
         assert phase in ['train','val','test']
         ########################################
         # training
@@ -283,20 +282,26 @@ class RegistrationTrainer(TrainerInit):
                 coordinates=tgt_over_batch_C.to(self.device)) """
 
             F0, F1, rotation_ab_pred, translation_ab_pred = \
-                self.model(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch, transform_ab, pos_pairs )
+                self.model(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch)
 
             identity = torch.eye(3).cuda()
-            
+
             #######################################
             # loss = correspondence + transfomer
-            stats = self.get_loss(over_xyz0, over_xyz1, F0, F1, over_correspondences, transform_ab ) 
-            rotation_ab, translation_ab = decompose_rotation_translation(transform_ab)
+            stats = self.get_loss(over_xyz0, over_xyz1, F0, F1, over_correspondences, transform_ab.to(self.device) ) 
+            rotation_ab, translation_ab = decompose_rotation_translation(transform_ab.to(self.device))
 
             #transform_point_cloud(over_xyz0, rotation_ab, translation_ab)
-            stats['rot_loss'] = F.mse_loss(torch.matmul(rotation_ab_pred.T, rotation_ab), identity) 
-            stats['trans_loss'] = F.mse_loss(translation_ab_pred, translation_ab.T)
-            stats['total_loss'] = stats['circle_loss'] + stats['rot_loss'] + stats['trans_loss']
-            total_loss = stats['total_loss']
+
+            rotation_loss= F.mse_loss(torch.matmul(rotation_ab_pred.T, rotation_ab), identity) 
+            translation_loss = F.mse_loss(translation_ab_pred, translation_ab.T)
+            circle_loss = stats['circle_loss']
+            total_loss = rotation_loss + translation_loss + circle_loss
+            
+            stats['rot_loss'] = rotation_loss
+            stats['trans_loss'] = translation_loss
+            stats['total_loss'] = total_loss 
+            
             total_loss.backward()
         
         else:
@@ -309,27 +314,31 @@ class RegistrationTrainer(TrainerInit):
                 tgt_batch_F.to(self.device),
                 coordinates=tgt_batch_C.to(self.device))
 
-
             F0, F1, rotation_ab_pred, translation_ab_pred = \
-                self.model(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch, transform_ab, pos_pairs )
+                self.model(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch )
 
             identity = torch.eye(3).cuda()
             
             #######################################
             # loss = correspondence + transfomer
-            stats = self.get_loss(over_xyz0, over_xyz1, F0, F1, over_correspondences, transform_ab )
-            rotation_ab, translation_ab = decompose_rotation_translation(transform_ab)
+            stats = self.get_loss(over_xyz0, over_xyz1, F0, F1, over_correspondences, transform_ab.to(self.device) )
+            rotation_ab, translation_ab = decompose_rotation_translation(transform_ab.to(self.device))
             
             #transform_point_cloud(over_xyz0, rotation_ab, translation_ab)
-            stats['rot_loss'] = F.mse_loss(torch.matmul(rotation_ab_pred.T, rotation_ab), identity) 
-            stats['trans_loss'] = F.mse_loss(translation_ab_pred, translation_ab.T)
-            stats['total_loss'] = stats['circle_loss'].item() + stats['rot_loss'].item() + stats['trans_loss'].item()
+            rotation_loss= F.mse_loss(torch.matmul(rotation_ab_pred.T, rotation_ab), identity) 
+            translation_loss = F.mse_loss(translation_ab_pred, translation_ab.T)
+            circle_loss = stats['circle_loss']
+            total_loss = rotation_loss + translation_loss + circle_loss
+            
+            stats['rot_loss'] = rotation_loss
+            stats['trans_loss'] = translation_loss
+            stats['total_loss'] = total_loss
 
         stats['circle_loss'] = float(stats['circle_loss'].detach())
         stats['feat_match_ratio'] = float(stats['feat_match_ratio'].detach())
         stats['rot_loss'] = float(stats['rot_loss'].detach()) 
         stats['trans_loss'] = float(stats['trans_loss'].detach())
-        stats['total_loss'] = float(stats['total_loss'])
+        stats['total_loss'] = float(stats['total_loss'].detach())
     
         return stats, rotation_ab, translation_ab, rotation_ab_pred, translation_ab_pred, eulers_ab
 
@@ -375,11 +384,11 @@ class RegistrationTrainer(TrainerInit):
                 stats, rotation_ab, translation_ab, rotation_ab_pred, \
                     translation_ab_pred, euler_ab = self.inference_one_batch(inputs, phase)
                 
-                rotations_ab.append(rotation_ab.detach().cpu().numpy())
-                translations_ab.append(translation_ab.detach().cpu().numpy())
-                rotations_ab_pred.append(rotation_ab_pred.detach().cpu().numpy())
-                translations_ab_pred.append(translation_ab_pred.detach().cpu().numpy())
-                eulers_ab.append(euler_ab.numpy())
+                rotations_ab.append(rotation_ab.unsqueeze(dim=0).detach().cpu().numpy())
+                translations_ab.append(translation_ab.unsqueeze(dim=0).detach().cpu().numpy())
+                rotations_ab_pred.append(rotation_ab_pred.unsqueeze(dim=0).detach().cpu().numpy())
+                translations_ab_pred.append(translation_ab_pred.unsqueeze(dim=0).detach().cpu().numpy())
+                eulers_ab.append(euler_ab.unsqueeze(dim=0).numpy())
 
                 if((curr_iter+1) % self.iter_size == 0 and phase == 'train' ):
                     gradient_valid = validate_gradient(self.model)
@@ -387,7 +396,7 @@ class RegistrationTrainer(TrainerInit):
                         self.optimizer.step()
                     else:
                         self.logger.write('gradient not valid\n')
-                    self.optimizer.zero_grad()
+                    #self.optimizer.zero_grad()
             
                 ################################
                 # update to stats_meter
@@ -403,9 +412,9 @@ class RegistrationTrainer(TrainerInit):
             eulers_ab = np.concatenate(eulers_ab, axis=0)
 
             rotations_ab_pred_euler = npmat2euler(rotations_ab_pred)
-            r_mse_ab = np.mean((rotations_ab_pred_euler - np.degrees(eulers_ab)) ** 2)
+            r_mse_ab = np.mean((rotations_ab_pred_euler -eulers_ab) ** 2)
             r_rmse_ab = np.sqrt(r_mse_ab)
-            r_mae_ab = np.mean(np.abs(rotations_ab_pred_euler - np.degrees(eulers_ab)))
+            r_mae_ab = np.mean(np.abs(rotations_ab_pred_euler - eulers_ab))
             t_mse_ab = np.mean((translations_ab - translations_ab_pred) ** 2)
             t_rmse_ab = np.sqrt(t_mse_ab)
             t_mae_ab = np.mean(np.abs(translations_ab - translations_ab_pred))
@@ -414,42 +423,42 @@ class RegistrationTrainer(TrainerInit):
 
             if (curr_iter + 1) % self.verbose_freq == 0 and self.verbose:
                 c_iter = num_iter * (epoch - 1) + curr_iter
+
                 for key, value in stats_meter.items():
                     self.writer.add_scalar(f'{phase}/{key}', value.avg, c_iter)
                 
-
                 message = f'{phase} Epoch: {epoch} [{curr_iter+1:4d}/{num_iter}]'
                 for key,value in stats_meter.items():
-                    message += f'{key}: {value.avg:.2f}\t'
+                    message += f'{key}: {value.avg:.6f}\t'
       
-                message += f'rot_MSE : {r_mse_ab:.2f}\t'
-                message += f'rot_RMSE : {r_rmse_ab:.2f}\t'
-                message += f'rot_MAE : {r_mae_ab:.2f}\t'
-                message += f'trans_MSE : {t_mse_ab:.2f}\t'
-                message += f'trans_RMSE : {t_rmse_ab:.2f}\t'
-                message += f'trans_MAE : {t_mae_ab:.2f}\t'
+                message += f'rot_MSE : {r_mse_ab:.4f}\t'
+                message += f'rot_RMSE : {r_rmse_ab:.4f}\t'
+                message += f'rot_MAE : {r_mae_ab:.4f}\t'
+                message += f'trans_MSE : {t_mse_ab:.6f}\t'
+                message += f'trans_RMSE : {t_rmse_ab:.6f}\t'
+                message += f'trans_MAE : {t_mae_ab:.6f}\t'
                 self.logger.write(message + '\n')
                 logging.info(
                     "{} Epoch: {} [{:4d}/{}], ".format(phase, epoch, curr_iter+1, num_iter)+
-                    "rot_MSE: {:.2f}, rot_RMSE: {:.2f}, rot_MAE: {:.2f}, trans_MSE: {:.2f}, trans_RMSE: {:.2f}, trans_MAE: {:.2f}".format(
+                    "rot_MSE: {:.2f}, rot_RMSE: {:.2f}, rot_MAE: {:.2f}, trans_MSE: {:.6f}, trans_RMSE: {:.6f}, trans_MAE: {:.6f}".format(
                         r_mse_ab, r_rmse_ab, r_mae_ab, t_mse_ab, t_rmse_ab, t_mae_ab )
                 )
             
         
         message = f'{phase} Epoch: {epoch}'
         for key,value in stats_meter.items():
-            message += f'{key}: {value.avg:.2f}\t'
+            message += f'{key}: {value.avg:.6f}\t'
 
-        message += f'rot_MSE : {r_mse_ab:.2f}\t'
-        message += f'rot_RMSE : {r_rmse_ab:.2f}\t'
-        message += f'rot_MAE : {r_mae_ab:.2f}\t'
-        message += f'trans_MSE : {t_mse_ab:.2f}\t'
-        message += f'trans_RMSE : {t_rmse_ab:.2f}\t'
-        message += f'trans_MAE : {t_mae_ab:.2f}\t'
+        message += f'rot_MSE : {r_mse_ab:.4f}\t'
+        message += f'rot_RMSE : {r_rmse_ab:.4f}\t'
+        message += f'rot_MAE : {r_mae_ab:.6f}\t'
+        message += f'trans_MSE : {t_mse_ab:.6f}\t'
+        message += f'trans_RMSE : {t_rmse_ab:.6f}\t'
+        message += f'trans_MAE : {t_mae_ab:.6f}\t'
         self.logger.write(message+'\n')
         logging.info(
-                    "{} Epoch: {} , ".format(phase, epoch)+
-                    "rot_MSE: {:.2f}, rot_RMSE: {:.2f}, rot_MAE: {:.2f}, trans_MSE: {:.2f}, trans_RMSE: {:.2f}, trans_MAE: {:.2f}".format(
-                        r_mse_ab, r_rmse_ab, r_mae_ab, t_mse_ab, t_rmse_ab, t_mae_ab )
-                )
+            "{} Epoch: {} , ".format(phase, epoch)+
+            "rot_MSE: {:.2f}, rot_RMSE: {:.2f}, rot_MAE: {:.2f}, trans_MSE: {:.6f}, trans_RMSE: {:.6f}, trans_MAE: {:.6f}".format(
+                r_mse_ab, r_rmse_ab, r_mae_ab, t_mse_ab, t_rmse_ab, t_mae_ab )
+        )
         return stats_meter

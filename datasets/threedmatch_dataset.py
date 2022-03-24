@@ -13,7 +13,7 @@ from sklearn.neighbors import NearestNeighbors
 from torch.utils.data import Dataset
 
 from tools.utils import load_obj, to_tsfm, to_o3d_pcd, to_tensor, get_correspondences
-from tools.model_util import npmat2euler
+from tools.model_util import npmat2euler, rotationMatrixToEulerAngles
 from tools.file import read_trajectory
 from datasets.basic_dataset import BasicDataset
 from tools.pointcloud import get_matching_indices, make_open3d_point_cloud, draw_registration_result
@@ -46,8 +46,8 @@ class ThreeDMatchPairDataset(BasicDataset):
     def __init__(self,
                phase,
                transform=None,
-               random_rotation=True,
-               random_scale=True,
+               random_rotation=False,
+               random_scale=False,
                manual_seed=False,
                config=None):
     #def __init__(self, infos, config):
@@ -85,18 +85,12 @@ class ThreeDMatchPairDataset(BasicDataset):
 
     """ def __len__(self):
         return len(self.infos['rot']) """
-    
-    def apply_transform(self, pts, trans):
-        R = trans[:3, :3]
-        T = trans[:3, 3]
-        return pts @ R.T + T
-        #return pts @ rot.T + trans.T
-    
+        
     def ground_truth_attention(self, p1, p2, trans):
 
         #draw_registration_result(p1, p2, trans)
         
-        ideal_pts2 = self.apply_transform(p1, trans) 
+        ideal_pts2 = apply_transform(p1, trans) 
 
         #ind = np.random.permutation(int(round(self.num_points/10)))
 
@@ -129,17 +123,23 @@ class ThreeDMatchPairDataset(BasicDataset):
         tgt_pcd = data1["pcd"]
         color0 = data0["color"]
         color1 = data1["color"] 
+        matching_search_voxel_size = self.matching_search_voxel_size
 
-        scale = self.min_scale + (self.max_scale - self.min_scale) * random.random()
-        src_pcd = scale * src_pcd
-        tgt_pcd = scale * tgt_pcd
+        if self.random_scale and random.random() < 0.95:
+            scale = self.min_scale + (self.max_scale - self.min_scale) * random.random()
+            matching_search_voxel_size *= scale
+            src_pcd = scale * src_pcd
+            tgt_pcd = scale * tgt_pcd
 
-        T0 = sample_random_trans(src_pcd, self.randg, self.rotation_range)
-        T1 = sample_random_trans(tgt_pcd, self.randg, self.rotation_range)
-        T_gt = (T1 @ np.linalg.inv(T0)).astype(np.float32)
+        if self.random_rotation:
+            T0 = sample_random_trans(src_pcd, self.randg, self.rotation_range)
+            T1 = sample_random_trans(tgt_pcd, self.randg, self.rotation_range)
+            T_gt = (T1 @ np.linalg.inv(T0)).astype(np.float32)
 
-        src_pcd = apply_transform(src_pcd, T0)
-        tgt_pcd = apply_transform(tgt_pcd, T1)
+            src_pcd = apply_transform(src_pcd, T0)
+            tgt_pcd = apply_transform(tgt_pcd, T1)
+        else:
+            T_gt = np.identity(4)
 
         #Predator DataLoader
         """ # get transformation
@@ -173,7 +173,10 @@ class ThreeDMatchPairDataset(BasicDataset):
             tgt_pcd += (np.random.rand(tgt_pcd.shape[0],3) - 0.5) * self.augment_noise """
 
 
-        euler = npmat2euler(R, 'zyx')
+        euler = npmat2euler(R)
+
+        pcd0 = make_open3d_point_cloud(src_pcd)
+        pcd1 = make_open3d_point_cloud(tgt_pcd)
 
         # Voxelization
         _, sel0 = ME.utils.sparse_quantize(np.ascontiguousarray(src_pcd) / self.voxel_size, return_index=True)
@@ -182,19 +185,32 @@ class ThreeDMatchPairDataset(BasicDataset):
         src_xyz = src_pcd[sel0]
         tgt_xyz = tgt_pcd[sel1]
 
-        matching_inds = get_correspondences(to_o3d_pcd(src_xyz), to_o3d_pcd(tgt_xyz), T_gt, search_voxel_size)
+        # Select features and points using the returned voxelized indices
+        pcd0.colors = o3d.utility.Vector3dVector(color0[sel0])
+        pcd1.colors = o3d.utility.Vector3dVector(color1[sel1])
+        pcd0.points = o3d.utility.Vector3dVector(np.array(pcd0.points)[sel0])
+        pcd1.points = o3d.utility.Vector3dVector(np.array(pcd1.points)[sel1])
+        # Get matches
+        matching_inds = get_matching_indices(pcd0, pcd1, T_gt, matching_search_voxel_size)
 
         src_over, tgt_over, over_index0, over_index1 = self.ground_truth_attention(src_xyz, tgt_xyz, T_gt)
 
         # get voxelized coordinates
         src_coords, tgt_coords = np.floor(src_xyz / self.voxel_size), np.floor(tgt_xyz / self.voxel_size)
 
+        npts0 = len(pcd0.colors)
+        npts1 = len(pcd1.colors)
+
+        feats_train0, feats_train1 = [], []
+
         # get feats
-        src_feats = np.ones((src_coords.shape[0],1),dtype=np.float32)
-        tgt_feats = np.ones((tgt_coords.shape[0],1),dtype=np.float32)
+        feats_train0.append(np.ones((npts0,1),dtype=np.float32))
+        feats_train1.append(np.ones((npts1,1),dtype=np.float32))
 
-        over_matching_inds = get_correspondences(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), T_gt, search_voxel_size)
+        feats0 = np.hstack(feats_train0)
+        feats1 = np.hstack(feats_train1)
 
+        over_matching_inds = get_matching_indices(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), T_gt, search_voxel_size)
         # overlap
         src_over_coords, tgt_over_coords = np.floor(src_over / self.voxel_size), np.floor(tgt_over / self.voxel_size) 
 
@@ -208,6 +224,6 @@ class ThreeDMatchPairDataset(BasicDataset):
         
         scale = 1
 
-        return (src_xyz, tgt_xyz, src_coords, tgt_coords, src_feats, tgt_feats ,\
+        return (src_xyz, tgt_xyz, src_coords, tgt_coords, feats0, feats1 ,\
             src_over, tgt_over, src_over_coords, tgt_over_coords, src_over_feats, tgt_over_feats, \
             over_index0, over_index1, matching_inds, over_matching_inds, T_gt, euler, scale)

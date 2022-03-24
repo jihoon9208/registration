@@ -47,6 +47,8 @@ class SparseResNetFull(ME.MinkowskiNetwork):
         CHANNELS = self.CHANNELS
         TR_CHANNELS = self.TR_CHANNELS
 
+        self.maxpooling = ME.MinkowskiMaxPooling(kernel_size=2, stride=1, dimension=D)
+
         self.conv1 = ME.MinkowskiConvolution(
             in_channels=in_channels,
             out_channels=CHANNELS[1],
@@ -114,7 +116,7 @@ class SparseResNetFull(ME.MinkowskiNetwork):
 
         self.conv3_tr = ME.MinkowskiConvolutionTranspose(
             
-            in_channels=CHANNELS[3] + TR_CHANNELS[4],
+            in_channels=CHANNELS[3] + TR_CHANNELS[4] + TR_CHANNELS[4],
             out_channels=TR_CHANNELS[3],
             kernel_size=3,
             stride=2,
@@ -128,7 +130,7 @@ class SparseResNetFull(ME.MinkowskiNetwork):
 
         self.conv2_tr = ME.MinkowskiConvolutionTranspose(
             
-            in_channels=CHANNELS[2] + TR_CHANNELS[3],        
+            in_channels=CHANNELS[2] + TR_CHANNELS[3] + TR_CHANNELS[3],        
             out_channels=TR_CHANNELS[2],
             kernel_size=3,
             stride=2,
@@ -141,7 +143,7 @@ class SparseResNetFull(ME.MinkowskiNetwork):
             BLOCK_NORM_TYPE, TR_CHANNELS[2], TR_CHANNELS[2], bn_momentum=bn_momentum, D=D)
 
         self.conv1_tr = ME.MinkowskiConvolution(
-            in_channels= CHANNELS[1] + TR_CHANNELS[2],
+            in_channels= CHANNELS[1] + TR_CHANNELS[1]+ TR_CHANNELS[2],
             out_channels=TR_CHANNELS[1],
             kernel_size=1,
             stride=1,
@@ -149,6 +151,15 @@ class SparseResNetFull(ME.MinkowskiNetwork):
             bias=False,
             dimension=D)
         
+        self.final = ME.MinkowskiConvolution(
+            in_channels=TR_CHANNELS[1],
+            out_channels=out_channels,
+            kernel_size=1,
+            stride=1,
+            dilation=1,
+            bias=True,
+            dimension=D)
+            
         ################
         # attention
         
@@ -159,16 +170,19 @@ class SparseResNetFull(ME.MinkowskiNetwork):
         source_s1 = self.norm1(source_s1)
         source_s1 = self.block1(source_s1)
         s_out = MEF.relu(source_s1)
+        s_out1 = self.maxpooling(s_out)
 
         source_s2 = self.conv2(s_out)
         source_s2 = self.norm2(source_s2)
         source_s2 = self.block2(source_s2)
         s_out = MEF.relu(source_s2)
+        s_out2 = self.maxpooling(s_out)
 
         source_s4 = self.conv3(s_out)
         source_s4 = self.norm3(source_s4)
         source_s4 = self.block3(source_s4)
         s_out = MEF.relu(source_s4)
+        s_out4 = self.maxpooling(s_out)
 
         source_s8 = self.conv4(s_out)
         source_s8 = self.norm4(source_s8)
@@ -180,30 +194,31 @@ class SparseResNetFull(ME.MinkowskiNetwork):
         s_out = self.block4_tr(s_out)
         source_s4_tr = MEF.relu(s_out)
 
-        s_out = ME.cat(source_s4_tr, source_s4)
+        s_out = ME.cat(source_s4_tr, source_s4, s_out4)
 
         s_out = self.conv3_tr(s_out)
         s_out = self.norm3_tr(s_out)
         s_out = self.block3_tr(s_out)
         source_s2_tr = MEF.relu(s_out)
 
-        s_out = ME.cat(source_s2_tr, source_s2)
+        s_out = ME.cat(source_s2_tr, source_s2, s_out2)
 
         s_out = self.conv2_tr(s_out)
         s_out = self.norm2_tr(s_out)
         s_out = self.block2_tr(s_out)
         source_s1_tr = MEF.relu(s_out)
 
-        s_out = ME.cat(source_s1_tr, source_s1)
+        s_out = ME.cat(source_s1_tr, source_s1, s_out1)
         s_out = self.conv1_tr(s_out)
         source = MEF.relu(s_out)
+        source = self.final(source)
         
         source = ME.SparseTensor(
             source.F / torch.norm(source.F, p=2, dim=1, keepdim=True),
             coordinate_map_key=source.coordinate_map_key,
             coordinate_manager=source.coordinate_manager)  
 
-        return source.F
+        return source
 
 
 class SparseResNetOver(ME.MinkowskiNetwork):

@@ -20,7 +20,7 @@ from lib.loss import MetricLoss
 from torch.multiprocessing import Process
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 
 
 def get_trainer(trainer):
@@ -53,7 +53,6 @@ def main(config, resume=False):
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.exp_gamma)
 
     #Predator dataloader 
-    
     """ train_set, val_set, benchmark_set = get_datasets(config)
 
     train_loader = torch.utils.data.DataLoader(train_set, 
@@ -100,6 +99,7 @@ def main(config, resume=False):
     get_loss = MetricLoss(config)
 
     Trainer = get_trainer(config.trainer)
+
     trainer = Trainer(
         config=config,
         data_loader=train_loader,

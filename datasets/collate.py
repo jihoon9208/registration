@@ -30,7 +30,7 @@ class CollateFunc:
         match_inds_batch, match_num_batch = [], []
         len_batch = []
 
-        curr_start_inds = torch.zeros((1,2)).int()
+        curr_start_inds = np.zeros((1, 2))
 
         for batch_id, _ in enumerate(matching_inds):
             N0 = coords0[batch_id].shape[0]
@@ -50,11 +50,11 @@ class CollateFunc:
             tgt_over_index.append(over_index1[batch_id].long())
 
             # correspondence 
-            matching_inds_batch.append(matching_inds[batch_id] + curr_start_inds)
-            over_matching_inds_batch.append(over_matching_inds[batch_id])
+            matching_inds_batch.append(torch.from_numpy(np.array(matching_inds[batch_id]) + curr_start_inds))
+            over_matching_inds_batch.append(torch.from_numpy(np.array(over_matching_inds[batch_id])))
 
             # correspondence of each batch 
-            match_inds_batch.append(matching_inds[batch_id])
+            match_inds_batch.append(torch.from_numpy(np.array(matching_inds[batch_id])))
             match_num_batch.append(len(matching_inds[batch_id]))
 
             len_batch.append([N0,N1])
@@ -86,12 +86,3 @@ class CollateFunc:
             'pos_pair': match_inds_batch,
             'pos_len': match_num_batch,
         }
-
-        """ 'sinput0_C': src_coords,
-            'sinput0_F': src_feats,
-            'sinput1_C': tgt_coords,
-            'sinput1_F': tgt_feats,
-            'sover0_C' : src_over_coords,
-            'sover0_F' : src_over_feats,
-            'sover1_C' : tgt_over_coords,
-            'sover1_F' : tgt_over_feats, """
