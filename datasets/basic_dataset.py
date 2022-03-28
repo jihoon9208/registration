@@ -10,7 +10,7 @@ class BasicDataset(Dataset):
     def __init__(self,
                 phase,
                 transform=None,
-                random_rotation=False,
+                random_rotation=True,
                 random_scale=False,
                 manual_seed=False,
                 config=None):

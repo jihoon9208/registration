@@ -46,3 +46,19 @@ def find_nn_gpu(F0, F1, nn_max_n=-1, return_distance=False, dist_type='SquareL2'
         return inds, dists
     else:
         return inds
+
+def rte_rre(T_pred, T_gt, rte_thresh, rre_thresh, eps=1e-16):
+    if T_pred is None:
+        return np.array([0, np.inf, np.inf])
+
+    rte = np.linalg.norm(T_pred[:3, 3] - T_gt[:3, 3]) * 100
+    rre = (
+        np.arccos(
+            np.clip(
+                (np.trace(T_pred[:3, :3].T @ T_gt[:3, :3]) - 1) / 2, -1 + eps, 1 - eps
+            )
+        )
+        * 180
+        / np.pi
+    )
+    return np.array([rte < rte_thresh and rre < rre_thresh, rte, rre])

@@ -26,6 +26,10 @@ trainer_arg.add_argument('--val_batch_size', type=int, default=1)
 # Metric learning loss
 trainer_arg.add_argument('--neg_thresh', type=float, default=1.4)
 trainer_arg.add_argument('--pos_thresh', type=float, default=0.1)
+
+trainer_arg.add_argument('--rte_thresh', type=int, default=30)
+trainer_arg.add_argument('--rre_thresh', type=int, default=15)
+
 trainer_arg.add_argument('--neg_weight', type=float, default=1)
 trainer_arg.add_argument('--log_scale', type=float, default=24)
 trainer_arg.add_argument('--pos_radius', type=float, default=0.0375)
@@ -71,7 +75,7 @@ dgf_arg.add_argument('--conv2_kernel_size', type=int, default=3)
 dgf_arg.add_argument('--alpha_factor', type=float, default=4)
 dgf_arg.add_argument('--eps', type=float, default=1e-12)
 dgf_arg.add_argument('--dist_type', type=str, default='L2')
-dgf_arg.add_argument('--best_val_metric', type=str, default='feat_match_ratio')
+dgf_arg.add_argument('--best_val_metric', type=str, default='recall')
 dgf_arg.add_argument('--k_nn_geof', default=32, type=int, help='number of neighbors to describe the local geometry')
 
 dgf_arg.add_argument('--num_trial', default=100000, type=int)
@@ -129,7 +133,7 @@ data_arg.add_argument('--augment_noise', type=float, default=0.005)
 
 data_arg.add_argument('--voxel_size', type=float, default=0.025)
 data_arg.add_argument(
-    '--threed_match_dir', type=str, default="../datasets/3dmatch/threedmatch")
+    '--threed_match_dir', type=str, default="../Datasets/3dmatch/threedmatch")
     #'--threed_match_dir', type=str, default="./data/indoor")
 data_arg.add_argument(
     '--kitti_root', type=str, default="../datasets/kitti/")

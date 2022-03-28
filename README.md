@@ -37,7 +37,9 @@ sudo apt-get install libopenblas-dev
 sudo apt-get install libomp-dev
 
 CONDAENV=YOUR_CONDA_ENVIRONMENT_LOCATION
+
 cd partition/ply_c
+
 cmake . -DPYTHON_LIBRARY=$CONDAENV/lib/libpython3.7m.so -DPYTHON_INCLUDE_DIR=$CONDAENV/include/python3.7m -DBOOST_INCLUDEDIR=$CONDAENV/include -DEIGEN3_INCLUDE_DIR=$CONDAENV/include/eigen3   
 
 cmake . -DPYTHON_LIBRARY=$CONDAENV/lib/libpython3.8.so -DPYTHON_INCLUDE_DIR=$CONDAENV/include/python3.8 -DBOOST_INCLUDEDIR=$CONDAENV/include -DEIGEN3_INCLUDE_DIR=$CONDAENV/include/eigen3   

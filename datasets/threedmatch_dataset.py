@@ -6,6 +6,7 @@ import torch
 import glob
 import random
 import logging
+from pytorch3d.transforms.rotation_conversions import matrix_to_euler_angles
 
 from scipy.spatial.transform import Rotation
 from scipy.linalg import expm, norm
@@ -46,7 +47,7 @@ class ThreeDMatchPairDataset(BasicDataset):
     def __init__(self,
                phase,
                transform=None,
-               random_rotation=False,
+               random_rotation=True,
                random_scale=False,
                manual_seed=False,
                config=None):
@@ -173,7 +174,7 @@ class ThreeDMatchPairDataset(BasicDataset):
             tgt_pcd += (np.random.rand(tgt_pcd.shape[0],3) - 0.5) * self.augment_noise """
 
 
-        euler = npmat2euler(R)
+        euler = matrix_to_euler_angles(torch.from_numpy(R), "XYZ")
 
         pcd0 = make_open3d_point_cloud(src_pcd)
         pcd1 = make_open3d_point_cloud(tgt_pcd)

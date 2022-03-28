@@ -20,8 +20,7 @@ from lib.loss import MetricLoss
 from torch.multiprocessing import Process
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
-
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 def get_trainer(trainer):
     if trainer == 'RegistrationTrainer':

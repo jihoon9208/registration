@@ -93,10 +93,10 @@ class EmbeddingFeatureFull(ME.MinkowskiNetwork):
         self.DGCNN = DGCNN(emb_dims=self.emb_dims)
 
         self.layer = nn.Sequential(
-            nn.Linear(64, 192),
-            nn.LayerNorm(192),
+            nn.Linear(64, 128),
+            nn.LayerNorm(128),
             nn.ReLU(),
-            nn.Linear(192, 32)
+            nn.Linear(128, 32)
         )
 
     def forward(self, full_pcd):
@@ -109,10 +109,12 @@ class EmbeddingFeatureFull(ME.MinkowskiNetwork):
         # Attention
 
         pcd_xyz = full_pcd.C[:,1:] * self.voxel_size
+        attention_feat = self.GCN(pcd_xyz, full_pcd.F)
         edge_feat = self.DGCNN(pcd_xyz.unsqueeze(dim = 0)).squeeze(dim=0).transpose(1,0)
-        #attention_feat = self.GCN(pcd_xyz, full_pcd.F)
+        
         #geo_out = self.geoffeat_extraction(pcd_xyz.detach().cpu().numpy())        
-        total_feat = torch.cat([sparse_feat, edge_feat], dim=-1)
+        total_feat = sparse_feat * attention_feat
+        total_feat = torch.cat([total_feat, edge_feat], dim=-1)
 
         total_feat = self.layer(total_feat)
         
@@ -318,20 +320,17 @@ class PoseEstimator(ME.MinkowskiNetwork):
                 votes, kernel_size=self.kernel_size, dimension=6
             )
 
-        # post processing
+        """ # post processing
         if self.refine_model is not None:
-            votes = self.refine_model(votes)
-
+            votes = self.refine_model(votes) """
+        
         rotation, translate = self.evaluate(votes)
         self.hspace = votes
         Transform = torch.eye(4)
         Transform[:3, :3] = rotation
-        Transform[:3, 3] = translate
+        Transform[:3, 3] = translate 
         # empty cache
         torch.cuda.empty_cache()
-
-        xyz0 = full_pcd0.C[:,1:] * self.voxel_size
-        xyz1 = full_pcd1.C[:,1:] * self.voxel_size
         
         #draw_registration_result(xyz0.detach().cpu().numpy(), xyz1.detach().cpu().numpy(), Transform.detach().cpu().numpy())
 
@@ -342,5 +341,5 @@ class PoseEstimator(ME.MinkowskiNetwork):
         """ rotation_ab, translation_ab, src_corr, src_sel, tgt_sel = self.head(full_out0, full_out1, \
             full_pcd0.C[:,1:] * self.voxel_size, full_pcd1.C[:,1:] * self.voxel_size, transform ) """
 
-        return full_over_feat0, full_over_feat1, rotation, translate
+        return full_over_feat0, full_over_feat1, Transform, votes
 
