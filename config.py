@@ -133,7 +133,7 @@ data_arg.add_argument('--augment_noise', type=float, default=0.005)
 
 data_arg.add_argument('--voxel_size', type=float, default=0.025)
 data_arg.add_argument(
-    '--threed_match_dir', type=str, default="../Datasets/3dmatch/threedmatch")
+    '--threed_match_dir', type=str, default="../datasets/3dmatch/threedmatch")
     #'--threed_match_dir', type=str, default="./data/indoor")
 data_arg.add_argument(
     '--kitti_root', type=str, default="../datasets/kitti/")

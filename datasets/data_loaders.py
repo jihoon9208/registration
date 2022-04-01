@@ -53,7 +53,7 @@ def make_data_loader(config, phase, batch_size, num_threads=0, shuffle=None):
         num_workers=num_threads,
         collate_fn=coll.collate_pair_fn,
         pin_memory=False,
-        drop_last=False)
+        drop_last=True)
 
     return loader
 

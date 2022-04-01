@@ -26,7 +26,7 @@ from tools.utils import to_o3d_pcd
 
 sys.path.append("./lib/model_exc")
 
-import libply_c
+#import libply_c
 
 def clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
@@ -92,33 +92,64 @@ class EmbeddingFeatureFull(ME.MinkowskiNetwork):
         self.emb_dims = 32
         self.DGCNN = DGCNN(emb_dims=self.emb_dims)
 
-        self.layer = nn.Sequential(
+        self.layer1 = nn.Sequential(
+            nn.Linear(32, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            nn.Linear(64, 32)
+        )
+        self.layer2 = nn.Sequential(
             nn.Linear(64, 128),
             nn.LayerNorm(128),
             nn.ReLU(),
-            nn.Linear(128, 32)
+            nn.Linear(128, 32),
+            nn.Sigmoid()
         )
+        self.max =  nn.Softmax(dim=1)
+   
+
+    def make_mask (self, feat_out, x):
+        _, feat_dim = feat_out.size()
+        x = x.repeat(1, feat_dim)
+        total_feat = torch.cat([feat_out, x ], dim =-1)
+        mask = self.layer2(total_feat)
+
+        return mask
+
+    def index_points(self, points, idx):
+        """
+		Input:
+			points: input points data, [B, N, C]
+			idx: sample index data, [B, S]
+		Return:
+			new_points:, indexed points data, [B, S, C]
+		"""
+        device = points.device
+        N, C = points.shape
+        masked_points = torch.zeros(N, C, device=device)
+        index0 = idx[:,0]
+        index1 = idx[:,1]
+        masked_points[index0, index1] = points[index0, index1]
+
+        return masked_points
+
+    def find_index(self, mask_val):
+
+        mask_idx = torch.nonzero((mask_val>0.5)*1.0)
+        return mask_idx
 
     def forward(self, full_pcd):
         
-        ###############################
-        # FCGF
-        sparse_feat = self.SparseResNet(full_pcd).F
-
-        ###############################
-        # Attention
-
-        pcd_xyz = full_pcd.C[:,1:] * self.voxel_size
-        attention_feat = self.GCN(pcd_xyz, full_pcd.F)
-        edge_feat = self.DGCNN(pcd_xyz.unsqueeze(dim = 0)).squeeze(dim=0).transpose(1,0)
+        pcd = full_pcd.C[:,1:] * self.voxel_size
+        sparse_feat, sparse_att_feat = self.SparseResNet(full_pcd)
+        sparse_feat = self.max(sparse_feat.F)
         
-        #geo_out = self.geoffeat_extraction(pcd_xyz.detach().cpu().numpy())        
-        total_feat = sparse_feat * attention_feat
-        total_feat = torch.cat([total_feat, edge_feat], dim=-1)
+        mask = self.make_mask(sparse_feat, sparse_att_feat.F)
 
-        total_feat = self.layer(total_feat)
-        
-        return total_feat
+        mask_dix = self.find_index(mask)
+        final_feat = self.index_points(sparse_feat, mask_dix)
+
+        return final_feat
 
 class DGCNN(nn.Module):
     def __init__(self, emb_dims=512):
@@ -294,7 +325,6 @@ class PoseEstimator(ME.MinkowskiNetwork):
         R = axis_angle_to_rotation(angle)
         return R, t
 
-    #def forward(self, full_pcd0, full_pcd1, over_pcd0, over_pcd1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch, transform, pos_pairs):
     def forward(self, full_pcd0, full_pcd1, over_xyz0, over_xyz1, over_index0, over_index1, inds_batch):
         
         global rotation
@@ -320,9 +350,9 @@ class PoseEstimator(ME.MinkowskiNetwork):
                 votes, kernel_size=self.kernel_size, dimension=6
             )
 
-        """ # post processing
+        # post processing
         if self.refine_model is not None:
-            votes = self.refine_model(votes) """
+            votes = self.refine_model(votes)
         
         rotation, translate = self.evaluate(votes)
         self.hspace = votes

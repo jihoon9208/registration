@@ -2,10 +2,12 @@
 python3.9
 
 pytorch 10.2
-conda install pytorch==1.9.0 torchvision torchaudio cudatoolkit=11.1 -c pytorch
-conda install pytorch=1.10.0 torchvision cudatoolkit=11.0 -c pytorch -c nvidia
+conda install pytorch==1.8.1 torchvision torchaudio cudatoolkit=11.3 -c pytorch
+conda install pytorch=1.10.1 torchvision cudatoolkit=11.3 -c pytorch -c nvidia
 
 conda install pytorch=1.11.0 torchvision cudatoolkit=11.3 -c pytorch -c nvidia
+
+pip install torch==1.10.0+cu113 torchvision torchaudio -f https://download.pytorch.org/whl/torch_stable.html
 
 
 pip install numpy scipy matplotlib open3d tensorboardX future-fstrings easydict joblib learn
@@ -24,10 +26,11 @@ conda install -c anaconda boost; conda install -c omnia eigen3; conda install ei
 
 conda install -c r libiconv
 
-conda install faiss-gpu cudatoolkit=10.2 -c pytorch
-conda install faiss-gpu cudatoolkit=11.3 -c pytorch
+conda install faiss-gpu cudatoolkit=10.2 -c pytorchnvcc 
+conda install faiss-gpu cudatoolkit=11.1 -c pytorch
 conda install -c anaconda pytorch-gpu
 
+conda install -c pytorch faiss-gpu
 conda install -c pytorch faiss-gpu
 
 conda install faiss-gpu cudatoolkit=11.0 -c pytorch-gpu
