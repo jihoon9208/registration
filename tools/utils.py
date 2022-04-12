@@ -98,7 +98,7 @@ class Logger:
 
         os.makedirs(self.path, exist_ok=True)
 
-        self.fw = open(self.path+'/log','a')
+        self.fw = open(self.path+'/log.txt','a')
 
     def write(self, text):
         self.fw.write(text)

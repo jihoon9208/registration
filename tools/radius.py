@@ -150,7 +150,8 @@ def feature_matching(F0, F1, knn=1, mutual=True):
     nn_index = find_knn_gpu(F0, F1, return_distance=False)
     matches = torch.cat(
         [torch.arange(nn_index.shape[0]).unsqueeze(1), nn_index.cpu()], knn
-    )
+    )   
+
     if mutual:
         nn_index_reverse = find_knn_gpu(F1, F0)
         matches_reverse = torch.cat(
@@ -168,3 +169,15 @@ def feature_matching(F0, F1, knn=1, mutual=True):
 
     torch.cuda.empty_cache()
     return matches
+
+def feat_match(src, tgt, F0, F1, knn=10):
+
+    N, C = F0.shape
+
+    dist, index = find_knn_gpu(F0,F1, return_distance=True)
+
+    bidx = torch.arange(N).view(N,-1)
+    bidx = bidx.expand_as(index).contiguous()
+
+    corr = F0
+    return dist, index

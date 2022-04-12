@@ -174,7 +174,7 @@ class ThreeDMatchPairDataset(BasicDataset):
             tgt_pcd += (np.random.rand(tgt_pcd.shape[0],3) - 0.5) * self.augment_noise """
 
 
-        euler = matrix_to_euler_angles(torch.from_numpy(R), "XYZ")
+        euler = matrix_to_euler_angles(torch.from_numpy(R), "ZYX")
 
         pcd0 = make_open3d_point_cloud(src_pcd)
         pcd1 = make_open3d_point_cloud(tgt_pcd)

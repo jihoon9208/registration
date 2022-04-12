@@ -8,6 +8,7 @@ import logging
 import torch
 from easydict import EasyDict as edict
 from model.network import PoseEstimator
+from model.simpleunet import SimpleNet
 
 from datasets.data_loaders import make_data_loader, get_datasets
 from config import get_config
@@ -16,11 +17,10 @@ from datasets.collate import CollateFunc as coll
 from lib.trainer import RegistrationTrainer
 from lib.loss import MetricLoss
 
-
-from torch.multiprocessing import Process
-
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+torch.multiprocessing.set_sharing_strategy('file_system')
+
 
 def get_trainer(trainer):
     if trainer == 'RegistrationTrainer':
@@ -33,7 +33,9 @@ def get_trainer(trainer):
 def main(config, resume=False):
 
   # Model initialization
-    model = PoseEstimator(config)
+    model = SimpleNet(
+            conv1_kernel_size=config.conv1_kernel_size,
+            D=6)
 
     if config.optimizer == 'SGD':
         optimizer = getattr(optim, config.optimizer)(
@@ -77,10 +79,10 @@ def main(config, resume=False):
                                         drop_last=False) """
 
     train_loader = make_data_loader(
-      config,
-      config.train_phase,
-      config.batch_size,
-      num_threads=config.train_num_thread)
+        config,
+        config.train_phase,
+        config.batch_size,
+        num_threads=config.train_num_thread)
 
  
     val_loader = make_data_loader(

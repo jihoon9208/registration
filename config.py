@@ -75,7 +75,8 @@ dgf_arg.add_argument('--conv2_kernel_size', type=int, default=3)
 dgf_arg.add_argument('--alpha_factor', type=float, default=4)
 dgf_arg.add_argument('--eps', type=float, default=1e-12)
 dgf_arg.add_argument('--dist_type', type=str, default='L2')
-dgf_arg.add_argument('--best_val_metric', type=str, default='recall')
+dgf_arg.add_argument('--best_val_metric1', type=str, default='loss')
+dgf_arg.add_argument('--best_val_metric2', type=str, default='recall')
 dgf_arg.add_argument('--k_nn_geof', default=32, type=int, help='number of neighbors to describe the local geometry')
 
 dgf_arg.add_argument('--num_trial', default=100000, type=int)
@@ -90,7 +91,7 @@ att_arg.add_argument('--kernel_size', type=int, default=16)
 # Optimizer arguments
 opt_arg = add_argument_group('Optimizer')
 opt_arg.add_argument('--optimizer', type=str, default='SGD')
-opt_arg.add_argument('--max_epoch', type=int, default=100)
+opt_arg.add_argument('--max_epoch', type=int, default=250)
 opt_arg.add_argument('--lr', type=float, default=1e-1)
 opt_arg.add_argument('--momentum', type=float, default=0.8)
 opt_arg.add_argument('--sgd_momentum', type=float, default=0.9)
@@ -133,7 +134,7 @@ data_arg.add_argument('--augment_noise', type=float, default=0.005)
 
 data_arg.add_argument('--voxel_size', type=float, default=0.025)
 data_arg.add_argument(
-    '--threed_match_dir', type=str, default="../datasets/3dmatch/threedmatch")
+    '--threed_match_dir', type=str, default="../Datasets/3dmatch/threedmatch")
     #'--threed_match_dir', type=str, default="./data/indoor")
 data_arg.add_argument(
     '--kitti_root', type=str, default="../datasets/kitti/")
