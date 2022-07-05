@@ -7,10 +7,11 @@ import json
 import logging
 import torch
 from easydict import EasyDict as edict
+from model import load_model
 from model.network import PoseEstimator
 from model.simpleunet import SimpleNet
 
-from datasets.data_loaders import make_data_loader, get_datasets
+from datasets.data_loaders import make_data_loader
 from config import get_config
 import torch.optim as optim
 from datasets.collate import CollateFunc as coll
@@ -32,10 +33,13 @@ def get_trainer(trainer):
 
 def main(config, resume=False):
 
-  # Model initialization
+    # Model initialization
+    
     model = SimpleNet(
             conv1_kernel_size=config.conv1_kernel_size,
             D=6)
+
+    #model = PoseEstimator(config)
 
     if config.optimizer == 'SGD':
         optimizer = getattr(optim, config.optimizer)(
@@ -44,7 +48,14 @@ def main(config, resume=False):
                 momentum=config.momentum,
                 weight_decay=config.weight_decay)
 
-    if config.optimizer == 'ADAM':
+    if config.optimizer == 'Adam':
+        optimizer = getattr(optim, config.optimizer)(
+                model.parameters(),
+                lr=config.lr,
+                betas=(0.9, 0.999),
+                weight_decay=config.weight_decay)
+
+    if config.optimizer == 'AdamW':
         optimizer = getattr(optim, config.optimizer)(
                 model.parameters(),
                 lr=config.lr,
@@ -52,6 +63,7 @@ def main(config, resume=False):
                 weight_decay=config.weight_decay)
 
     scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.exp_gamma)
+    
 
     #Predator dataloader 
     """ train_set, val_set, benchmark_set = get_datasets(config)
@@ -84,7 +96,6 @@ def main(config, resume=False):
         config.batch_size,
         num_threads=config.train_num_thread)
 
- 
     val_loader = make_data_loader(
         config,
         config.val_phase,

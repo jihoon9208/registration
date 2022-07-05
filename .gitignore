@@ -19,3 +19,5 @@ features_tmp/
 configs/
 data/
 *.zip
+*.log
+*.info

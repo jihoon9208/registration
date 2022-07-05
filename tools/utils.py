@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import open3d as o3d
 
-def square_distance_loss(src, dst, normalised = False):
+def square_distance(src, dst):
     """
     Calculate Euclid distance between each two points.
 
@@ -19,26 +19,11 @@ def square_distance_loss(src, dst, normalised = False):
     _, M, _ = dst.shape
     
     dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    if(normalised):
-        dist += 2
-    else:
-        dist += torch.sum(src ** 2, -1)[:, :, None]
-        dist += torch.sum(dst ** 2, -1)[:, None, :]
+    dist += torch.sum(src ** 2, -1)[:, :, None]
+    dist += torch.sum(dst ** 2, -1)[:, None, :]
         
     dist = torch.clamp(dist, min=1e-12, max=None)
     return dist
-
-def validate_gradient(model):
-    """
-    Confirm all the gradients are non-nan and non-inf
-    """
-    for name, param in model.named_parameters():
-        if param.grad is not None:
-            if torch.any(torch.isnan(param.grad)):
-                return False
-            if torch.any(torch.isinf(param.grad)):
-                return False
-    return True
 
 def load_obj(path):
     """
@@ -71,8 +56,6 @@ def to_tensor(x):
         return torch.from_numpy(x)
     else:
         raise ValueError(f'Can not convert to torch tensor, {x}')
-
-
 
 def to_array(tensor):
     """
@@ -107,18 +90,3 @@ class Logger:
     def close(self):
         self.fw.close()
 
-def get_correspondences(src_pcd, tgt_pcd, trans, search_voxel_size, K=None):
-    src_pcd.transform(trans)
-    pcd_tree = o3d.geometry.KDTreeFlann(tgt_pcd)
-
-    correspondences = []
-    for i, point in enumerate(src_pcd.points):
-        [count, idx, _] = pcd_tree.search_radius_vector_3d(point, search_voxel_size)
-        if K is not None:
-            idx = idx[:K]
-        for j in idx:
-            correspondences.append([i, j])
-    
-    correspondences = np.array(correspondences)
-    correspondences = torch.from_numpy(correspondences)
-    return correspondences

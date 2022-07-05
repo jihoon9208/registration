@@ -2,23 +2,35 @@ import argparse
 import logging
 import os
 import time
-
-import gin
-import numpy as np
-import pytorch_lightning as pl
+import open3d as o3d
+from lib.timer import Timer, AverageMeter
+from easydict import EasyDict as edict
 import torch
+import numpy as np
 from rich.console import Console
 from rich.progress import track
 from rich.table import Table
 
-import src.data
-import src.feature
-import src.models
-from src.dhvr import DHVR
-from src.utils.file import ensure_dir
-from src.utils.logger import setup_logger
-from src.utils.misc import count_parameters
+from config_test import get_config
+from model.network import PoseEstimator
+from model.simpleunet import SimpleNet
 
+from datasets.data_loaders import make_data_loader
+from datasets.collate import CollateFunc as coll
+
+from tools.file import ensure_dir
+from datasets.threedmatch_dataset import ThreeDMatchTestDataset
+from tools.test_utils import datasets_setting
+from tools.pointcloud import draw_registration_result, draw_point_cloud
+
+from model import load_model
+import MinkowskiEngine as ME
+
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+
+ALL_DATASETS = [ThreeDMatchTestDataset]
+dataset_str_mapping = {d.__name__: d for d in ALL_DATASETS}
 
 def print_table(subset_names, stats, rte_ths, rre_ths):
     console = Console()
@@ -55,7 +67,7 @@ def print_table(subset_names, stats, rte_ths, rre_ths):
     console.print(table)
 
 
-def rte_rre(T_pred, T_gt, rte_thresh, rre_thresh, eps=1e-16):
+def rte_rre(T_pred, T_gt, rte_thresh, rre_thresh, eps=1e-8):
     if T_pred is None:
         return np.array([0, np.inf, np.inf])
 
@@ -78,12 +90,17 @@ def run_benchmark(
     TE_THRESH,
     RE_THRESH,
     log_interval=100,
+    device = None,
+    voxel_size = None,
+    overlap = None
 ):
     tot_num_data = len(data_loader)
-    data_loader_iter = iter(data_loader)
+    data_loader_iter = data_loader.__iter__()
 
     dataset = data_loader.dataset
     subset_names = dataset.subset_names
+
+    pose_estimate = PoseEstimator(config).to(device)
 
     stats = np.zeros((tot_num_data, 5))
     stats[:, -1] = -1
@@ -92,12 +109,15 @@ def run_benchmark(
     with torch.no_grad():
         for batch_idx in track(range(tot_num_data)):
             batch = data_loader_iter.next()
-            sname, xyz0, xyz1, trans = batch[0]
+            sname, xyz0, xyz1, trans, f0, f1 = batch[0]
             sid = subset_names.index(sname)
             T_gt = np.linalg.inv(trans)
+            #T_gt = trans
 
-            start = time.time()
-            T = method.register(xyz0, xyz1)
+            sinput0, sinput1, src_over, tgt_over, over_index0, over_index1 = datasets_setting(xyz0, xyz1, T_gt, voxel_size, overlap, device)
+
+            start = time.time()            
+            T, _, _ = pose_estimate(sinput0, sinput1, torch.from_numpy(src_over).to(device), torch.from_numpy(tgt_over).to(device), over_index0, over_index1, method.to(device))
             end = time.time()
 
             result = rte_rre(T, T_gt, TE_THRESH, RE_THRESH)
@@ -105,6 +125,21 @@ def run_benchmark(
             stats[batch_idx, 3] = end - start
             stats[batch_idx, 4] = sid
             poses.append(T.numpy())
+
+
+            recall = str(round(result[0],2))
+            rte = str(round(result[1],2))
+            rre = str(round(result[2],2))
+
+            filename0 = f0.split('/')[-1]
+            filename1 = f1.split('/')[-1]
+
+            if float(recall) > 80 and float(rte) < 5 and float(rre) < 2.5 :
+                with open("./data_list.txt", "a") as f:
+                    f.write("filename0 : " + sname + "/" + filename0 + '\n' 
+                        "filename1 : " + sname + "/" + filename1 + '\n'
+                        + "recall : " + recall + " RTE : " + rte +  " RRE :" + rre + '\n')
+           
 
             if batch_idx % log_interval == 0 and batch_idx > 0:
                 cur_stats = stats[:batch_idx]
@@ -115,95 +150,67 @@ def run_benchmark(
                     f"recall: {cur_recall:.2f}, rte: {cur_rte:.2f}, rre: {cur_rre:.2f}"
                 )
 
-    return subset_names, stats, np.stack(poses, axis=0)
 
+def test(args):
 
-@gin.configurable()
-def test(
-    out_dir,
-    run_name,
-    checkpoint_path,
-    feature_class,
-    model_class,
-    dataset_class,
-    log_interval,
-):
+    ensure_dir(args.target)
+    checkpoint = torch.load(args.model)
+    config = checkpoint['config']
+
+    # initialize Model
+    search_voxel_size = config.voxel_size * config.positive_pair_search_voxel_size_multiplier
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    num_feats = 1
+    model = SimpleNet(
+            conv1_kernel_size=config.conv1_kernel_size,
+            D=6)
+    model.load_state_dict(checkpoint['state_dict'])
+    model.eval()
+  
+    timer, tmeter = Timer(), AverageMeter()
+
     # initialize data loader
-    dataset = dataset_class()
-    dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=1, num_workers=1, shuffle=False, collate_fn=lambda x: x
-    )
-    TE_THRESH = dataset.TE_THRESH
-    RE_THRESH = dataset.RE_THRESH
+    test_loader = make_data_loader(
+        args,
+        args.test_phase,
+        args.val_batch_size,
+        num_threads=args.val_num_thread)
 
-    # initialize device
-    device = torch.device("cuda")
+    TE_THRESH = test_loader.dataset.TE_THRESH
+    RE_THRESH = test_loader.dataset.RE_THRESH
 
-    # initialize feature extractor
-    feature_extractor = feature_class(device=device)
-
-    # initialize refinement model
-    refine_model = model_class().to(device)
-    ckpt = torch.load(checkpoint_path)
-
-    def remove_prefix(k, prefix):
-        return k[len(prefix) :] if k.startswith(prefix) else k
-
-    state_dict = {remove_prefix(k, "model."): v for k, v in ckpt["state_dict"].items()}
-    refine_model.load_state_dict(state_dict)
-    logging.info(f"Load refine model from checkpoint {checkpoint_path}")
-    logging.info(f"number of parameters: {count_parameters(refine_model)}")
-    refine_model.eval()
-    dhvr = DHVR(
-        device=device, feature_extractor=feature_extractor, refine_model=refine_model
-    )
-
-    # run benchmark
     subset_names, stats, poses = run_benchmark(
-        dataloader,
-        method=dhvr,
-        TE_THRESH=TE_THRESH,
-        RE_THRESH=RE_THRESH,
-        log_interval=log_interval,
+        test_loader,
+        method = model,
+        TE_THRESH = TE_THRESH,
+        RE_THRESH = RE_THRESH,
+        log_interval=100,
+        device = device,
+        voxel_size = config.voxel_size,
+        overlap = search_voxel_size
     )
 
     # print_table
     print_table(subset_names, stats, TE_THRESH, RE_THRESH)
 
     # save results
-    exp_dir = os.path.join(out_dir, run_name)
+    exp_dir = os.path.join(args.out_dir, args.run_name)
     ensure_dir(exp_dir)
     stat_filename = os.path.join(exp_dir, "stats.npz")
-    conf_filename = os.path.join(exp_dir, "config.gin")
+    conf_filename = os.path.join(exp_dir, "config.txt")
     np.savez(stat_filename, stats=stats, names=["dhvr"], poses=poses)
     with open(conf_filename, "w") as f:
         f.write(gin.operative_config_str())
     logging.info(f"Saved results to {stat_filename}, {conf_filename}")
 
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("config", type=str, help="path to config file")
-    parser.add_argument("--run_name", type=str, required=True, help="experiment title")
-    parser.add_argument(
-        "--load_path", type=str, required=True, help="path to checkpoint"
-    )
-    parser.add_argument(
-        "--out_dir",
-        type=str,
-        default="experiments",
-        help="path to save benchmark results",
-    )
-    parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--seed", type=int, default=1234)
-    args = parser.parse_args()
 
-    # random seed
-    pl.seed_everything(args.seed)
+    config = get_config()
 
-    # setup config and logger
-    gin.parse_config_file(args.config)
-    setup_logger(args.run_name, args.debug)
-
+    dconfig = vars(config)
+    config = edict(dconfig)
     # start test
-    test(args.out_dir, args.run_name, args.load_path)
+    test(config)

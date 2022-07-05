@@ -260,3 +260,25 @@ def sparse_gaussian(data, kernel_size=5, dimension=3):
     # forward
     out = conv(sinput)
     return out
+
+
+def sparse_bilateral(data, kernel_size=5, dimension=3):
+    # prepare input sparse tensor
+    if isinstance(data, ME.SparseTensor):
+        sinput = data
+    else:
+        raise TypeError()
+
+    # build gaussian kernel weight
+    hsfilter = gaussianNd(kernel_size, dimension).to(data.device)
+
+    # prepare conv layer
+    conv = ME.MinkowskiConvolution(
+        in_channels=1, out_channels=1, kernel_size=kernel_size, dimension=dimension
+    )
+    with torch.no_grad():
+        conv.kernel.data = hsfilter.reshape(-1, 1, 1)
+
+    # forward
+    out = conv(sinput)
+    return out
