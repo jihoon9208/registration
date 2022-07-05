@@ -9,8 +9,7 @@ import numpy as np
 import random
 from scipy.linalg import expm, norm
 from sklearn.neighbors import NearestNeighbors
-from scipy.sparse import csr_matrix
-from .pointcloud import get_matching_indices, make_open3d_point_cloud
+
 
 import open3d as o3d
 
@@ -45,73 +44,6 @@ def sample_points(pts, num_points):
     else:
         pts = np.random.permutation(pts)
     return pts
-
-
-def ground_truth_attention_distance(xyz0, xyz1, color0, color1, trans, search_voxel_size ):
-    
-    pcd0 = make_open3d_point_cloud(xyz0)
-    pcd1 = make_open3d_point_cloud(xyz1)
-
-    pcd0.colors = o3d.utility.Vector3dVector(color0)
-    pcd1.colors = o3d.utility.Vector3dVector(color1)
-    # Sizes
-    N = xyz0.shape[0]
-    M = xyz1.shape[0]
-    matches = get_matching_indices(pcd0, pcd1, trans, search_voxel_size, K=None)
-    
-    l, r = [], []
-    for i, j in matches:
-        l.append(i)
-        r.append(j)
-    
-    A = csr_matrix((np.ones(len(matches)), (l, r)), (N, M))
-#     print(A.shape)
-#     print(A.sum(axis=1).shape)
-#     A = A / A.sum(axis=1)
-#     B = csr_matrix((distance[:, 0], (np.arange(M), neighbors)), (M, N)).T
-#     A = A * B
-
-    return A, pcd0, pcd1, matches
-
-def ground_truth_attention(p1, p2, color0, color1,trans):
-    
-    # Ideal pts2 with ground truth transformation
-    ideal_pts2 = p1 @ trans[:3, :3].T + trans[:3, 3:4].T
-    
-    # Sizes
-    N = p1.shape[0]
-    M = p2.shape[0]
-    
-    # Search NN for each ideal_pt2 in p2
-    nn = NearestNeighbors(n_neighbors=1).fit(p2)
-    distance, neighbors = nn.kneighbors(ideal_pts2)
-    neighbors = neighbors[:, 0]
-#     print(neighbors, len(neighbors))
-    
-    # Create ideal attention matrix
-#     A = csr_matrix((distance[:, 0], (np.arange(N), neighbors)), (N, M))
-    A = csr_matrix((np.ones(N), (np.arange(N), neighbors)), (N, M))
-#     print(A.shape)
-
-    # Search NN for each p2 in ideal_pt2
-    nn = NearestNeighbors(n_neighbors=1).fit(ideal_pts2)
-    distance, neighbors = nn.kneighbors(p2)
-    neighbors = neighbors[:, 0]
-    
-    # Create ideal attention matrix
-    B = csr_matrix((np.ones(M), (np.arange(M), neighbors)), (M, N)).T
-#     B = csr_matrix((distance[:, 0], (np.arange(M), neighbors)), (M, N)).T
-    
-    # Keep only consistent neighbors by pointwise multiplication
-#     thres = 0.03
-#     A = A.toarray()
-#     B = B.toarray()
-#     A = (A < thres) & (A > 0)
-#     B = (B < thres) & (B > 0)
-    A = A.multiply(B) 
-    
-#     A = A * B
-    return A
 
 # Rotation matrix along axis with angle theta
 def M(axis, theta):
@@ -153,7 +85,6 @@ class Compose:
             coords, feats = transform(coords, feats)
         return coords, feats
 
-
 class Jitter:
 
     def __init__(self, mu=0, sigma=0.01):
@@ -167,7 +98,6 @@ class Jitter:
             else:
                 feats += (torch.randn_like(feats) * self.sigma) + self.mu
         return coords, feats
-
 
 class ChromaticShift:
     def __init__(self, mu=0, sigma=0.1):

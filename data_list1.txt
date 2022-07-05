@@ -1,0 +1,28 @@
+filename : ../Datasets/kitti/icp/8_1026_1037.npy
+recall : 1.0 RTE : 1.99 RRE :0.19
+filename : ../Datasets/kitti/icp/8_1523_1535.npy
+recall : 1.0 RTE : 1.3 RRE :0.15
+filename : ../Datasets/kitti/icp/8_1971_1996.npy
+recall : 1.0 RTE : 1.51 RRE :0.16
+filename : ../Datasets/kitti/icp/8_2565_2575.npy
+recall : 1.0 RTE : 1.75 RRE :0.13
+filename : ../Datasets/kitti/icp/8_2881_2891.npy
+recall : 1.0 RTE : 1.77 RRE :0.13
+filename : ../Datasets/kitti/icp/8_3834_3842.npy
+recall : 1.0 RTE : 0.51 RRE :0.13
+filename : ../Datasets/kitti/icp/10_324_336.npy
+recall : 1.0 RTE : 1.97 RRE :0.11
+filename : ../Datasets/kitti/icp/10_758_765.npy
+recall : 1.0 RTE : 1.78 RRE :0.17
+filename : ../Datasets/kitti/icp/8_1195_1206.npy
+recall : 1.0 RTE : 1.17 RRE :0.14
+filename : ../Datasets/kitti/icp/8_2717_2725.npy
+recall : 1.0 RTE : 1.55 RRE :0.19
+filename : ../Datasets/kitti/icp/8_2881_2891.npy
+recall : 1.0 RTE : 1.77 RRE :0.13
+filename : ../Datasets/kitti/icp/8_3126_3138.npy
+recall : 1.0 RTE : 1.26 RRE :0.1
+filename : ../Datasets/kitti/icp/8_3834_3842.npy
+recall : 1.0 RTE : 0.51 RRE :0.13
+filename : ../Datasets/kitti/icp/10_758_765.npy
+recall : 1.0 RTE : 1.78 RRE :0.17

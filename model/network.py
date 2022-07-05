@@ -1,52 +1,28 @@
-import sys
-import logging
-from turtle import clear, forward
-from matplotlib.transforms import Transform
+from pyrsistent import v
 import torch
-import math
+
 import gc
 import numpy as np
-from typing import Any
+
 import torch.nn as nn
 import torch.nn.functional as F
-import copy
+
 import MinkowskiEngine as ME
-import MinkowskiEngine.MinkowskiFunctional as MEF
+
 from torch_batch_svd import svd as fast_svd
-from lib.sparse import corr_and_add
+
 
 from model.resunet import SparseResNet
+from model.originresunet import ResUNetBN2C
 from model.simpleunet import SimpleNet
-from tools.pointcloud import draw_registration_result
-from tools.radius import compute_graph_nn, feature_matching, feat_match
+
+from tools.radius import feature_matching
 from tools.transform_estimation import sparse_gaussian, axis_angle_to_rotation, rotation_to_axis_angle
-from lib.timer import random_triplet
+from lib.timer import random_quad
+from model.feature import FCGF, FPFH
+from tools.utils import  square_distance
+from tools.pointcloud import draw_registration_result
 
-from model.attention import GCN
-from tools.transforms import apply_transform
-from tools.utils import to_o3d_pcd
-
-sys.path.append("./lib/model_exc")
-
-#import libply_c
-
-def clones(module, N):
-    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
-
-
-def attention(query, key, value, mask=None, dropout=None):
-    d_k = query.size(-1)
-    scores = torch.matmul(query, key.transpose(-2, -1).contiguous()) / math.sqrt(d_k)
-    if mask is not None:
-        scores = scores.masked_fill(mask == 0, -1e9)
-    p_attn = F.softmax(scores, dim=-1)
-    return torch.matmul(p_attn, value), p_attn
-
-def point_permute(p):
-    return p.permute(1,0)
-  
-def xyz_permute(xyz):
-    return xyz.permute(1,0)
 
 class EmbeddingFeatureFull(ME.MinkowskiNetwork):
     def __init__(self, config):
@@ -57,96 +33,26 @@ class EmbeddingFeatureFull(ME.MinkowskiNetwork):
     
         num_feats = 1
 
-        self.SparseResNet = SparseResNet(
+        """ self.SparseResNet = SparseResNet(
             self.config, 
             num_feats,
             config.sparse_dims,
             bn_momentum=config.bn_momentum,
             conv1_kernel_size=config.conv1_kernel_size,
+            D=3).cuda() """
+
+        self.SparseResNet = ResUNetBN2C(
+            num_feats,
+            config.sparse_dims,
+            bn_momentum=config.bn_momentum,
+            normalize_feature=True,
+            conv1_kernel_size=config.conv1_kernel_size,
             D=3).cuda()
-
-        #self.GCN = GCN(self.config)
-        self.emb_dims = 32
-
-
-        self.layer1 = nn.Sequential(
-            nn.Linear(1088, 512),
-            nn.LayerNorm(512),
-            nn.LeakyReLU(),
-        )
-        self.layer2 = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.LayerNorm(256),
-            nn.LeakyReLU(),
-        )
-        self.layer3 = nn.Sequential(
-            nn.Linear(256, 128),
-            nn.LayerNorm(128),
-            nn.LeakyReLU(),
-        )
-        self.layer4 = nn.Sequential(
-            nn.Linear(128, 32)  
-        )
-
-    def make_mask (self, feat_out, x):
-        _, feat_dim = feat_out.size()
-        x = x.repeat(1, feat_dim)
-        total_feat = torch.cat([feat_out, x ], dim =-1)
-        mask = self.layer2(total_feat)
-
-        return mask
-
-    def index_points(self, points, idx):
-        """
-		Input:
-			points: input points data, [B, N, C]
-			idx: sample index data, [B, S]
-		Return:
-			new_points:, indexed points data, [B, S, C]
-		"""
-        device = points.device
-        N, C = points.shape
-        masked_points = torch.zeros(N, C, device=device)
-        index0 = idx[:,0]
-        index1 = idx[:,1]
-        masked_points[index0, index1] = points[index0, index1]
-
-        return masked_points
-
-    def find_index(self, mask_val):
-
-        mask_idx = torch.nonzero((mask_val>0.5)*1.0)
-        return mask_idx
 
     def forward(self, full_pcd):
         
-        pcd = full_pcd.C[:,1:] * self.voxel_size
-        N, C = pcd.shape
-        """ sparse_feat, sparse_att_feat = self.SparseResNet(full_pcd)
-        sparse_feat = self.max(sparse_feat.F)
-        
-        mask = self.make_mask(sparse_feat, sparse_att_feat.F)
+        sparse_feat = self.SparseResNet(full_pcd)
 
-        mask_dix = self.find_index(mask)
-
-        masked_feat = self.index_points(sparse_feat, mask_dix)
-        final_feat = torch.cat([masked_feat, sparse_att_feat.T], dim=-1) """
-
-        sparse_feat , sparse_global_feat = self.SparseResNet(full_pcd)
-        #cluster_feat = self.GCN(pcd, sinput.F)
-        """ reshpae_sparse_feat = sparse_global_feat.F.repeat(N,1)
-        
-        #dgcnn_feat , dgcnn_att_feat = self.emb_geof(pcd)
-        total_feat = torch.cat([sparse_feat.F, reshpae_sparse_feat], dim=-1)
-
-        x = self.layer1(total_feat)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        final_feat = self.layer4(x)
-
-        final_feat = F.log_softmax(final_feat, dim=1) """
-        
-        
         return sparse_feat
 
 class PoseEstimator(ME.MinkowskiNetwork):
@@ -159,51 +65,77 @@ class PoseEstimator(ME.MinkowskiNetwork):
         self.r_binsize = config.r_binsize
         self.t_binsize = config.t_binsize
         self.smoothing = True
-        self.kernel_size = 3
+        self.kernel_size = 5
         
         self.full_embed = EmbeddingFeatureFull(self.config)
-        """ self.refine_model = SimpleNet (
-            conv1_kernel_size=config.conv1_kernel_size,
-            D=6).cuda() """
-        
+
+        self.feature_extraction = FCGF(self.config)
+        #self.feature_extraction = FPFH(self.voxel_size)
+
     def sample_correspondence(self, src, tgt, src_feat, tgt_feat):
 
         N,_ = src.shape
 
-        pairs = feature_matching(src_feat, tgt_feat, mutual=False)
-        pairs_inv = feature_matching(tgt_feat, src_feat, mutual=False)
+        pairs_straight = feature_matching(src_feat, tgt_feat, mutual=False)
+        pairs_inverse = feature_matching(tgt_feat, src_feat, mutual=False)
 
-        pairs = torch.cat([pairs, pairs_inv.roll(1, 1)], dim=0)
+        pairs = torch.cat([pairs_straight, pairs_inverse.roll(1, 1)], dim=0)
 
         src_corr = src[pairs[:, 0]]
         tgt_corr = tgt[pairs[:, 1]]
 
-        src_dist = ((src_corr - src_corr.roll(1, 1)) ** 2).sum(-1) ** 0.5
-        tgt_dist = ((tgt_corr - tgt_corr.roll(1, 1)) ** 2).sum(-1) ** 0.5
+        src_dist = ((src_corr - src_corr.roll(1, 1)).pow(2)).sum(-1).sqrt()
+        tgt_dist = ((tgt_corr - tgt_corr.roll(1, 1)).pow(2)).sum(-1).sqrt()
         cross_dist = torch.abs(src_dist - tgt_dist)
 
-        #local_measure = (cross_dist < 4 * self.voxel_size).float()
+        ##############################################
+        # First order 
 
-        cross_dist_inv = cross_dist.pow(-1)
-        sum_cross_dist_inv = cross_dist_inv.sum()
-        cross_dist_inv = cross_dist_inv.div(sum_cross_dist_inv)
+        cross_inv = cross_dist.pow(-1)
+        _, index = torch.topk(cross_inv, k=int(N), dim=0, sorted=False)
 
-        if (cross_dist_inv.all()==0):
+        cross_inv = cross_inv[index.squeeze(dim=-1)]
+        cross_inv_sum = cross_inv.sum(dtype=torch.int64)
+        cross_inv_div = cross_inv / cross_inv_sum
+        test = cross_inv_div.sum()
+
+        if (cross_inv_div.all()==0):
+            choice = np.random.permutation(pairs.size(0))[:int(round(N/4))]
+            pairs = pairs[choice]
             masked_pairs = pairs
         else : 
-            _, index = torch.topk(cross_dist_inv, k=int(round(N/2)), dim=0)
-            #masked_cross_dist = (cross_dist_inv > 0.0001).nonzero(as_tuple=False)
+            _, index = torch.topk(cross_inv_div, k=int(round(N/4)), dim=0, sorted=False)
+        #masked_cross_dist = (cross_dist_inv > 0.0001).nonzero(as_tuple=False)
             masked_pairs = pairs[index.squeeze(dim=-1)]
             
-        
-        # sample random triplets
-        triplets = random_triplet(len(masked_pairs), self.num_trial * 5)
+        ################################
+        #
+        quadists = random_quad(len(masked_pairs), self.num_trial * 5)
 
         # check geometric constraints
+        idx0 = masked_pairs[quadists, 0]
+        idx1 = masked_pairs[quadists, 1]
+     
+        xyz0_sel = src[idx0].reshape(-1, 4, 3)
+        xyz1_sel = tgt[idx1].reshape(-1, 4, 3)
+
+        dist = square_distance(xyz0_sel, xyz1_sel)
+
+        index = torch.arange(4).expand(dist.shape[0],4).reshape(dist.shape[0],1,4)
+
+        dist_diagonal = torch.gather(dist, 1, index.to(dist.device) )
+        dist_diagonal = dist_diagonal.type(torch.DoubleTensor).pow(-1)
+        _, index = torch.topk(dist_diagonal, k = 3, dim = -1, sorted=False)
+        index = index.squeeze(dim=1)
+
+        triplets = torch.gather(quadists, 1 ,index)
+
         idx0 = masked_pairs[triplets, 0]
         idx1 = masked_pairs[triplets, 1]
+
         xyz0_sel = src[idx0].reshape(-1, 3, 3)
         xyz1_sel = tgt[idx1].reshape(-1, 3, 3)
+    
         li = torch.norm(xyz0_sel - xyz0_sel.roll(1, 1), p=2, dim=2)
         lj = torch.norm(xyz1_sel - xyz1_sel.roll(1, 1), p=2, dim=2)
 
@@ -217,13 +149,13 @@ class PoseEstimator(ME.MinkowskiNetwork):
 
         triplets = triplets[torch.logical_and(triangle_check, dup_check)]
 
-        if triplets.shape[0] > self.num_trial:
+        if triplets.shape[0] > (self.num_trial / 10):
             idx = np.round(
-                np.linspace(0, triplets.shape[0] - 1, self.num_trial)
+                np.linspace(0, triplets.shape[0] - 1, int(self.num_trial / 10))
             ).astype(int)
             triplets = triplets[idx]
 
-        return masked_pairs, triplets
+        return masked_pairs, triplets, cross_inv_div
 
 
     def solve(self, xyz0, xyz1, pairs, triplets):
@@ -239,7 +171,7 @@ class PoseEstimator(ME.MinkowskiNetwork):
         # solve rotation
         H = xyz1_centered.transpose(1, 2) @ xyz0_centered
         U, D, V = fast_svd(H)
-        S = torch.eye(3).repeat(U.shape[0], 1, 1).to(U.device)
+        S = torch.eye(3).repeat(U.shape[0], 1, 1).type(U.dtype).to(U.device)
         det = U.det() * V.det()
         S[det < 0, -1, -1] = -1
         Rs = U @ S @ V.transpose(1, 2)
@@ -247,11 +179,32 @@ class PoseEstimator(ME.MinkowskiNetwork):
 
         # solve translation using centroid
         xyz0_rotated = torch.bmm(Rs, xyz0_mean.permute(0, 2, 1)).squeeze(2)
-        t = xyz1_mean.squeeze(1) - xyz0_rotated
+        translate = xyz1_mean.squeeze(1) - xyz0_rotated
 
-        return angles, t
+        return angles, translate
 
-    def vote(self, Rs, ts):
+    def feature_measure(self, feat0, feat1, pairs, triplets):
+
+        feat0_sel = feat0[pairs[triplets, 0]]
+        feat1_sel = feat1[pairs[triplets, 1]]
+
+        feat0_mean = feat0_sel.mean(1, keepdim=True).squeeze(dim=1)
+        feat1_mean = feat1_sel.mean(1, keepdim=True).squeeze(dim=1)
+
+        N, _ = feat0_mean.shape
+        M, _ = feat1_mean.shape
+
+        dist = -2 * torch.matmul(feat0_mean, feat1_mean.T)     
+        dist += torch.sum(feat0_mean ** 2, -1).view(N, 1)
+        dist += torch.sum(feat1_mean ** 2, -1).view(1, M)
+
+        diag_ind = range(feat1_mean.shape[0])
+        dist[diag_ind,diag_ind] = np.inf
+        final_dist = dist.min(dim=1).values
+
+        return final_dist
+
+    def vote(self, Rs, ts, dist):
         r_coord = torch.floor(Rs / self.r_binsize)
         t_coord = torch.floor(ts / self.t_binsize)
         coord = torch.cat(
@@ -262,7 +215,8 @@ class PoseEstimator(ME.MinkowskiNetwork):
             ],
             dim=1,
         )
-        feat = torch.ones(coord.shape[0]).unsqueeze(1).to(r_coord.device)
+        #feat = torch.ones(coord.shape[0]).unsqueeze(1).to(r_coord.device)
+        feat = dist.unsqueeze(1)
         vote = ME.SparseTensor(
             feat.float(),
             coordinates=coord.int(),
@@ -278,34 +232,39 @@ class PoseEstimator(ME.MinkowskiNetwork):
         R = axis_angle_to_rotation(angle)
         return R, t
 
-    def forward(self, full_pcd0, full_pcd1, over_xyz0, over_xyz1, over_index0, over_index1, refine_model):
+    def forward(self, full_pcd0, full_pcd1, over_xyz0, over_xyz1, over_index0, over_index1 , refine_model):
         
         global rotation
         global translate
+
         gc.collect()
+
+        N, C = over_xyz0.shape
+
+        xyz0 = full_pcd0.C[:,1:] * self.voxel_size
+        xyz1 = full_pcd1.C[:,1:] * self.voxel_size
         
-        full_out0 = self.full_embed(full_pcd0)
-        full_out1 = self.full_embed(full_pcd1)
-         
-        full_over_feat0 = full_out0.F[over_index0,:]
-        full_over_feat1 = full_out1.F[over_index1,:]
+        """ full_out0, att_out0 = self.full_embed(full_pcd0)
+        full_out1, att_out1 = self.full_embed(full_pcd1) """
+
+        # FCGF
+        full_out0 = self.feature_extraction.extract_feature(full_pcd0)
+        full_out1 = self.feature_extraction.extract_feature(full_pcd1)
+
+        # FHFP
+        #full_out0, txyz0 = self.feature_extraction.extract_feature(xyz0.detach().cpu().numpy())
+        #full_out1, txyz1 = self.feature_extraction.extract_feature(xyz1.detach().cpu().numpy())
+
+        full_over_feat0 = full_out0[over_index0,:].to(full_pcd0.device)
+        full_over_feat1 = full_out1[over_index1,:].to(full_pcd0.device)
         
-        del full_out0, full_out1
-
-        """ xyz0 = full_pcd0.C[:,1:] * self.voxel_size
-        xyz1 = full_pcd1.C[:,1:] * self.voxel_size """
-        
-        # Sample Correspondencs
-
-        pairs, combinations = self.sample_correspondence(over_xyz0, over_xyz1, full_over_feat0, full_over_feat1)
-
-        del full_over_feat0, full_over_feat1
-
+        pairs, combinations, confidence = self.sample_correspondence(over_xyz0, over_xyz1, full_over_feat0, full_over_feat1)
         angles, ts = self.solve(over_xyz0, over_xyz1, pairs, combinations)
 
+        dist = self.feature_measure(full_over_feat0, full_over_feat1, pairs, combinations)
+
         # rotation & translation voting
-        votes = self.vote(angles, ts)
-        del angles, ts
+        votes = self.vote(angles, ts, dist)
 
         # gaussian smoothing
         if self.smoothing:
@@ -314,6 +273,9 @@ class PoseEstimator(ME.MinkowskiNetwork):
             )
 
         # post processing
+        #if self.refine_model is not None:
+        #    votes = self.refine_model(votes)
+
         if refine_model is not None:
             votes = refine_model(votes)
         
@@ -322,11 +284,12 @@ class PoseEstimator(ME.MinkowskiNetwork):
         Transform = torch.eye(4)
         Transform[:3, :3] = rotation
         Transform[:3, 3] = translate
+
+        #draw_registration_result(xyz0.detach().cpu().numpy(), xyz1.detach().cpu().numpy(), Transform)
+
         # empty cache
         gc.collect()
         torch.cuda.empty_cache()
         
-        #draw_registration_result(xyz0.detach().cpu().numpy(), xyz1.detach().cpu().numpy(), Transform.detach().cpu().numpy())
-
-        return Transform, votes
+        return Transform, votes, confidence
 

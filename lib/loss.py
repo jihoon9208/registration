@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import numpy as np
-from tools.utils import square_distance_loss
+from tools.utils import square_distance
 from sklearn.metrics import precision_recall_fscore_support
 from tools.transforms import apply_transform
 
@@ -141,14 +141,53 @@ def transformation_loss( gt_R, gt_t, pred_R, pred_t, alpha=1.0):
         gt_t: [B,3]
         alpha: weight
     '''
-    Identity = []
-    for i in range(pred_R.shape[0]):
-        Identity.append(torch.eye(3,3).cuda())
-    Identity = torch.stack(Identity, dim=0)
+    Identity = torch.eye(3,3).cuda()
+
     resi_R = torch.norm((torch.matmul(pred_R.transpose(1,0).contiguous(),gt_R) - Identity), dim=0, keepdim=False)
     resi_t = torch.norm((pred_t - gt_t),  keepdim=False)
     loss_R = torch.mean(resi_R)
     loss_t = torch.mean(resi_t)
-    loss = alpha * loss_R + loss_t
+    
+    return loss_R, loss_t
 
-    return loss, loss_R, loss_t
+def corrcofidence_loss(gt_corr, pcd0, pcd1, confidence):
+
+    N,_ = pcd0.shape
+    w_class_loss = 0
+
+    src_idx = list(set(gt_corr[:,0].int().tolist()))
+    tgt_idx = list(set(gt_corr[:,1].int().tolist()))
+
+    score = confidence.detach().clone()
+
+    src_gt = torch.zeros(pcd0.size(0), dtype=torch.float32)
+    src_gt[src_idx]=1.
+    tgt_gt = torch.zeros(pcd1.size(0), dtype=torch.float32)
+    tgt_gt[tgt_idx]=1.
+    gt_labels = torch.cat((src_gt, tgt_gt)).to(score.device)
+
+    choice = np.random.permutation(gt_labels.size(0))[:int(round(N))]
+    gt_labels = gt_labels[choice]
+    
+    criterion = nn.BCEWithLogitsLoss(reduction='none')
+
+    class_loss = criterion(score, gt_labels) 
+
+    class_loss = torch.nan_to_num(class_loss)
+    weights = torch.ones_like(gt_labels)
+    w_negative = gt_labels.sum()/gt_labels.size(0) 
+    w_positive = 1 - w_negative  
+    
+    weights[gt_labels >= 0.5] = w_positive
+    weights[gt_labels < 0.5] = w_negative
+    w_class = weights * class_loss 
+
+    w_class_loss = torch.nanmean(w_class)
+    
+    if not torch.isfinite(w_class_loss):
+        import pdb
+        pdb.set_trace()
+        #print('WARNING: non-finite loss, ending training ')
+        #exit(1)
+
+    return w_class_loss

@@ -1,12 +1,17 @@
 import logging
-import model.network 
+import model.simpleunet as simpleunets
+import model.resunet as resunets
+import model.originresunet as orgin
+
 
 MODELS = []
 
 def add_models(module):
     MODELS.extend([getattr(module, a) for a in dir(module) if 'Net' in a or 'MLP' in a])
 
-add_models(network)
+add_models(simpleunets)
+#add_models(resunets)
+add_models(orgin)
 
 def load_model(name):
     '''Creates and returns an instance of the model given its class name.

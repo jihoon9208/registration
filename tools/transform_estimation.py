@@ -207,7 +207,7 @@ def rotation_to_axis_angle(R):
     theta = torch.acos(((R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]) - 1) / 2 + eps)
     sin_theta = torch.sin(theta)
 
-    singular = torch.zeros(3, dtype=torch.float32).to(theta.device)
+    singular = torch.zeros(3, dtype=theta.dtype).to(theta.device)
 
     multi = 1 / (2 * sin_theta + eps)
     rx = multi * (R[:, 2, 1] - R[:, 1, 2]) * theta

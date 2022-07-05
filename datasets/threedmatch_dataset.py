@@ -8,16 +8,15 @@ import random
 import logging
 from pytorch3d.transforms.rotation_conversions import matrix_to_euler_angles
 
-from scipy.spatial.transform import Rotation
 from scipy.linalg import expm, norm
 from sklearn.neighbors import NearestNeighbors
 from torch.utils.data import Dataset
 
-from tools.utils import load_obj, to_tsfm, to_o3d_pcd, to_tensor, get_correspondences
-from tools.model_util import npmat2euler, rotationMatrixToEulerAngles
+from tools.utils import to_o3d_pcd, to_tensor
+
 from tools.file import read_trajectory
 from datasets.basic_dataset import BasicDataset
-from tools.pointcloud import get_matching_indices, make_open3d_point_cloud, draw_registration_result
+from tools.pointcloud import get_matching_indices, overlap_get_matching_indices ,make_open3d_point_cloud
 from tools.transforms import apply_transform, decompose_rotation_translation
 
 import MinkowskiEngine as ME
@@ -42,7 +41,7 @@ class ThreeDMatchPairDataset(BasicDataset):
     DATA_FILES = {
       'train': './datasets/split/indoor/train_3dmatch.txt',
       'val': './datasets/split/indoor/val_3dmatch.txt',
-      'test': './config/test_3dmatch.txt'
+      'test': './datasets/split/indoor/test_3dmatch.txt'
     }
     def __init__(self,
                phase,
@@ -73,7 +72,8 @@ class ThreeDMatchPairDataset(BasicDataset):
         for name in subset_names:
             fname = name + "*%.2f.txt" % self.OVERLAP_RATIO
             fnames_txt = glob.glob(root + "/" + fname)
-            assert len(fnames_txt) > 0, f"Make sure that the path {root} has data {fname}"
+            if phase == 'train' or phase == 'val':
+                assert len(fnames_txt) > 0, f"Make sure that the path {root} has data {fname}"
             for fname_txt in fnames_txt:
                 with open(fname_txt) as f:
                     content = f.readlines()
@@ -88,12 +88,8 @@ class ThreeDMatchPairDataset(BasicDataset):
         return len(self.infos['rot']) """
         
     def ground_truth_attention(self, p1, p2, trans):
-
-        #draw_registration_result(p1, p2, trans)
         
         ideal_pts2 = apply_transform(p1, trans) 
-
-        #ind = np.random.permutation(int(round(self.num_points/10)))
 
         nn = NearestNeighbors(n_neighbors=1).fit(p2)
         distance, neighbors1 = nn.kneighbors(ideal_pts2)
@@ -124,7 +120,7 @@ class ThreeDMatchPairDataset(BasicDataset):
         tgt_pcd = data1["pcd"]
         color0 = data0["color"]
         color1 = data1["color"] 
-        matching_search_voxel_size = self.matching_search_voxel_size
+        matching_search_voxel_size = self.search_voxel_size
 
         if self.random_scale and random.random() < 0.95:
             scale = self.min_scale + (self.max_scale - self.min_scale) * random.random()
@@ -142,42 +138,9 @@ class ThreeDMatchPairDataset(BasicDataset):
         else:
             T_gt = np.identity(4)
 
-        #Predator DataLoader
-        """ # get transformation
-        rot = self.infos['rot'][idx]
-        trans = self.infos['trans'][idx]
-
-        T_gt = to_tsfm(rot, trans)
-
-        file0 = os.path.join(self.root, self.infos['src'][idx])
-        file1 = os.path.join(self.root, self.infos['tgt'][idx])
-        src_pcd = torch.load(file0)
-        tgt_pcd = torch.load(file1) """
-
-        search_voxel_size = self.search_voxel_size
         R, T = decompose_rotation_translation(T_gt)
 
-        # add gaussian noise
-        """ if self.data_augmentation:            
-            # rotate the point cloud
-            euler_ab = np.random.rand(3) * np.pi * 2 / self.rot_factor # anglez, angley, anglex
-            rot_ab = Rotation.from_euler('zyx', euler_ab).as_matrix()
-            if(np.random.rand(1)[0] > 0.5):
-                src_pcd = np.matmul(rot_ab,src_pcd.T).T
-                rot = np.matmul(rot,rot_ab.T)
-            else:
-                tgt_pcd = np.matmul(rot_ab,tgt_pcd.T).T
-                rot = np.matmul(rot_ab,rot)
-                trans = np.matmul(rot_ab,trans)
-
-            src_pcd += (np.random.rand(src_pcd.shape[0],3) - 0.5) * self.augment_noise
-            tgt_pcd += (np.random.rand(tgt_pcd.shape[0],3) - 0.5) * self.augment_noise """
-
-
         euler = matrix_to_euler_angles(torch.from_numpy(R), "ZYX")
-
-        pcd0 = make_open3d_point_cloud(src_pcd)
-        pcd1 = make_open3d_point_cloud(tgt_pcd)
 
         # Voxelization
         _, sel0 = ME.utils.sparse_quantize(np.ascontiguousarray(src_pcd) / self.voxel_size, return_index=True)
@@ -185,6 +148,9 @@ class ThreeDMatchPairDataset(BasicDataset):
 
         src_xyz = src_pcd[sel0]
         tgt_xyz = tgt_pcd[sel1]
+
+        pcd0 = make_open3d_point_cloud(src_pcd)
+        pcd1 = make_open3d_point_cloud(tgt_pcd)
 
         # Select features and points using the returned voxelized indices
         pcd0.colors = o3d.utility.Vector3dVector(color0[sel0])
@@ -211,7 +177,7 @@ class ThreeDMatchPairDataset(BasicDataset):
         feats0 = np.hstack(feats_train0)
         feats1 = np.hstack(feats_train1)
 
-        over_matching_inds = get_matching_indices(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), T_gt, search_voxel_size)
+        over_matching_inds = overlap_get_matching_indices(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), T_gt, matching_search_voxel_size)
         # overlap
         src_over_coords, tgt_over_coords = np.floor(src_over / self.voxel_size), np.floor(tgt_over / self.voxel_size) 
 
@@ -228,3 +194,51 @@ class ThreeDMatchPairDataset(BasicDataset):
         return (src_xyz, tgt_xyz, src_coords, tgt_coords, feats0, feats1 ,\
             src_over, tgt_over, src_over_coords, tgt_over_coords, src_over_feats, tgt_over_feats, \
             over_index0, over_index1, matching_inds, over_matching_inds, T_gt, euler, scale)
+
+class ThreeDMatchTestDataset:
+
+    DATA_FILES = {"test": "./datasets/split/indoor/test_3dmatch.txt"}
+    CONFIG_ROOT = "./datasets/config/3DMatch"
+    TE_THRESH = 30
+    RE_THRESH = 15
+
+    def __init__(self, phase, config):
+        self.root = config.source
+        
+        subset_names = open(self.DATA_FILES[phase]).read().split()
+        self.subset_names = subset_names
+
+        self.files = []
+        for sname in subset_names:
+            traj_file = os.path.join(self.CONFIG_ROOT, sname, "gt.log")
+            assert os.path.exists(traj_file)
+            traj = read_trajectory(traj_file)
+            for ctraj in traj:
+                i = ctraj.metadata[0]
+                j = ctraj.metadata[1]
+                T_gt = ctraj.pose
+                self.files.append((sname, i, j, T_gt))
+        logging.info(f"Loaded {self.__class__.__name__} with {len(self.files)} data")
+
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        
+        sname, i, j, T_gt = self.files[idx]
+        file0 = os.path.join(self.root, sname, f"cloud_bin_{i}.ply")
+        file1 = os.path.join(self.root, sname, f"cloud_bin_{j}.ply")
+
+        pcd0 = o3d.io.read_point_cloud(file0)
+        pcd1 = o3d.io.read_point_cloud(file1)
+
+        xyz0 = np.asarray(pcd0.points).astype(np.float32)
+        xyz1 = np.asarray(pcd1.points).astype(np.float32)
+
+        return sname, xyz0, xyz1, T_gt
+
+class ThreeDLoMatchTestDataset(ThreeDMatchTestDataset):
+    """3DLoMatch test dataset"""
+
+    SPLIT_FILES = {"test": "./datasets/splits/test_3dmatch.txt"}
+    CONFIG_ROOT = "./datasets/config/3DLoMatch"

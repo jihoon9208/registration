@@ -4,36 +4,26 @@ import gc
 import logging
 import numpy as np
 import json
-from tqdm import tqdm
-import open3d as o3d
 
+from rich.progress import track
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import torch.nn.functional as F
-from torch.autograd.grad_mode import no_grad
+
 from pytorch3d.transforms.rotation_conversions import matrix_to_euler_angles
 
 from tensorboardX import SummaryWriter
 import MinkowskiEngine as ME
-from sklearn.neighbors import NearestNeighbors
-from tools.pointcloud import draw_registration_result, make_open3d_point_cloud
 
 #from model import load_model
 from lib.eval import rte_rre
-import model
 from model.network import PoseEstimator
 from tools.file import ensure_dir
 from tools.transform_estimation import rotation_to_axis_angle
-from tools.utils import validate_gradient, to_array, to_tsfm, Logger, to_tensor
-from tools.model_util import npmat2euler, rotationMatrixToEulerAngles,transform_point_cloud, transform_point_cloud0 ,cdist_torch
-from tools.transforms import apply_transform, decompose_rotation_translation
-from lib.loss import transformation_loss
-from lib.timer import Timer, AverageMeter
-from lib.eval import find_nn_gpu
-from tools.transforms import sample_points
+from tools.utils import Logger
+from tools.transforms import decompose_rotation_translation
+from lib.loss import transformation_loss, corrcofidence_loss
+from lib.timer import AverageMeter
 
-
+logging.getLogger().setLevel(logging.INFO)
 
 class TrainerInit:
 
@@ -60,8 +50,7 @@ class TrainerInit:
             raise ValueError('GPU not available, but cuda flag set')
 
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        self.device1 = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
-        
+
         self.config = config
         self.model = model
         self.optimizer = optimizer
@@ -84,8 +73,7 @@ class TrainerInit:
         self.r_binsize = config.r_binsize
         self.t_binsize = config.t_binsize
 
-        self.best_val_metric1 = config.best_val_metric1
-        self.best_val_metric2 = config.best_val_metric2
+        self.best_val_metric = config.best_val_metric
         self.best_val_epoch = np.inf
         self.best_val_loss = 1e5
         self.best_val_recall = -1e5
@@ -121,10 +109,8 @@ class TrainerInit:
                 model.load_state_dict(state['state_dict'])
                 self.scheduler.load_state_dict(state['scheduler'])
                 self.optimizer.load_state_dict(state['optimizer'])
-                #self.best_val_loss = state['best_val_loss']
                 self.best_val_recall = state['best_val_recall']
-                #self.best_val_metric1 = state['best_val_metric']
-                self.best_val_metric2 = state['best_val_metric']
+                self.best_val_metric = state['best_val_metric']
                 self.best_val_epoch = state['best_val_epoch']
 
             else:
@@ -145,9 +131,9 @@ class TrainerInit:
 
             lr = self.scheduler.get_lr()
             logging.info(f" Epoch: {epoch}, LR: {lr}")
-            #with torch.autograd.set_detect_anomaly(True):
-            train_dict, train_rotations_ab, train_translations_ab, train_rotations_ab_pred, \
-                train_translations_ab_pred, train_eulers_ab =self.inference_one_epoch(epoch, 'train')
+            with torch.autograd.set_detect_anomaly(True):
+                train_dict, train_rotations_ab, train_translations_ab, train_rotations_ab_pred, \
+                    train_translations_ab_pred, train_eulers_ab =self.inference_one_epoch(epoch, 'train')
 
             self._save_checkpoint(epoch)
             self.scheduler.step()
@@ -157,6 +143,11 @@ class TrainerInit:
                     val_translations_ab_pred, val_eulers_ab = self.inference_one_epoch(epoch, 'val')
 
             train_loss = train_dict['loss'].avg
+            train_rre = train_dict['rre'].avg
+            train_rte = train_dict['rte'].avg
+
+            val_rre = val_dict['rre'].avg
+            val_rte = val_dict['rte'].avg
             
             train_rotations_ab_pred_euler = matrix_to_euler_angles(train_rotations_ab_pred, "ZYX")
             train_rotations_ab_pred_euler = train_rotations_ab_pred_euler.detach().cpu().numpy()
@@ -193,8 +184,8 @@ class TrainerInit:
             self.logger.write(message+'\n')
             logging.info(
                 "Train Epoch: {} , ".format(epoch) +
-                "Loss : {:.6f}, rot_MSE: {:.6f}, rot_RMSE: {:.6f}, rot_MAE: {:.6f}, trans_MSE: {:.6f}, trans_RMSE: {:.6f}, trans_MAE: {:.6f}".format(
-                    train_loss, train_r_mse_ab, train_r_rmse_ab, train_r_mae_ab, train_t_mse_ab, train_t_rmse_ab, train_t_mae_ab )
+                "Loss : {:.6f}, rre: {:.6f}, rte: {:.6f}, rot_MSE: {:.6f}, rot_RMSE: {:.6f}, rot_MAE: {:.6f}, trans_MSE: {:.6f}, trans_RMSE: {:.6f}, trans_MAE: {:.6f}".format(
+                    train_loss, train_rre, train_rte, train_r_mse_ab, train_r_rmse_ab, train_r_mae_ab, train_t_mse_ab, train_t_rmse_ab, train_t_mae_ab )
             )
 
             ##########################################################
@@ -214,28 +205,20 @@ class TrainerInit:
             self.logger.write(message+'\n')
             logging.info(
                 "Validation Epoch: {} , ".format(epoch)+
-                "rot_MSE: {:.6f}, rot_RMSE: {:.6f}, rot_MAE: {:.6f}, trans_MSE: {:.6f}, trans_RMSE: {:.6f}, trans_MAE: {:.6f}".format(
-                     val_r_mse_ab, val_r_rmse_ab, val_r_mae_ab, val_t_mse_ab, val_t_rmse_ab, val_t_mae_ab )
+                "rre: {:.6f}, rte: {:.6f}, rot_MSE: {:.6f}, rot_RMSE: {:.6f}, rot_MAE: {:.6f}, trans_MSE: {:.6f}, trans_RMSE: {:.6f}, trans_MAE: {:.6f}".format(
+                    val_rre, val_rte, val_r_mse_ab, val_r_rmse_ab, val_r_mae_ab, val_t_mse_ab, val_t_rmse_ab, val_t_mae_ab )
             )
             
-            """ if val_dict[self.best_val_metric1].avg < self.best_val_loss :
+            if val_dict[self.best_val_metric].avg >= self.best_val_recall :
                 logging.info(
-                    f'Saving the best val model with loss: {val_dict[self.best_val_metric1].avg}'
+                    f'Saving the best val model with {self.best_val_metric}: {val_dict[self.best_val_metric].avg}'
                 )
-                self.best_val_loss = val_dict[self.best_val_metric1].avg
-                self.best_val_epoch = epoch
-                self._save_checkpoint(epoch, 'best_val_loss_checkpoint')
-             """
-            if val_dict[self.best_val_metric2].avg > self.best_val_recall :
-                logging.info(
-                    f'Saving the best val model with {self.best_val_metric2}: {val_dict[self.best_val_metric2].avg}'
-                )
-                self.best_val_recall = val_dict[self.best_val_metric2].avg
+                self.best_val_recall = val_dict[self.best_val_metric].avg
                 self.best_val_epoch = epoch
                 self._save_checkpoint(epoch, 'best_val_recall_checkpoint')
             else:
                 logging.info(
-                    f'Current best val model with {self.best_val_metric2}: {self.best_val_recall} at epoch {self.best_val_epoch}'
+                    f'Current best val model with {self.best_val_metric}: {self.best_val_recall} at epoch {self.best_val_epoch}'
                 )
 
     def _save_checkpoint(self, epoch, filename='checkpoint'):
@@ -245,10 +228,8 @@ class TrainerInit:
             'optimizer': self.optimizer.state_dict(),
             'scheduler': self.scheduler.state_dict(),
             'config': self.config,
-            #'best_val_loss' : self.best_val_loss,
             'best_val_recall' : self.best_val_recall,
-            #'best_val_metric1': self.best_val_metric1,
-            'best_val_metric2': self.best_val_metric2,
+            'best_val_metric': self.best_val_metric,
             'best_val_epoch' : self.best_val_epoch
         }
         filename = os.path.join(self.checkpoint_dir, f'{filename}.pth')
@@ -274,11 +255,12 @@ class RegistrationTrainer(TrainerInit):
         self.pos_thresh = config.pos_thresh
         self.neg_weight = config.neg_weight
 
+        self.alpha = config.alpha
+        self.beta = config.beta
+
     
     def stats_dict_train(self):
         stats=dict()
-        # feature match recall, divided by number of ground truth pairs
-
         stats['loss'] = 0.
         stats['recall'] = 0.
         stats['rte'] = 0.
@@ -288,12 +270,10 @@ class RegistrationTrainer(TrainerInit):
 
     def stats_dict_val(self):
         stats=dict()
-        # feature match recall, divided by number of ground truth pairs
-
         stats['recall'] = 0.
         stats['rte'] = 0.
         stats['rre'] = 0.
-
+        
         return stats
 
     def stats_meter(self, phase):
@@ -319,15 +299,14 @@ class RegistrationTrainer(TrainerInit):
         src_batch_C, src_batch_F = ME.utils.sparse_collate(src_coord, src_feat)
         tgt_batch_C, tgt_batch_F = ME.utils.sparse_collate(tgt_coord, tgt_feat)
 
-        #pcd0_xyz = input_dict['pcd0'].cpu().numpy()
-        #pcd1_xyz = input_dict['pcd1'].cpu().numpy()
-        
+        over_corr = input_dict['over_correspondences']        
+
         transform_ab = torch.from_numpy(input_dict['T_gt'].astype(np.float32))
         eulers_ab = input_dict['Euler_gt']
 
         over_xyz0 , over_xyz1 = input_dict['pcd0_over'].to(self.device), input_dict['pcd1_over'].to(self.device)
         over_index0, over_index1 = input_dict['over_index0'].int().tolist(), input_dict['over_index1'].int().tolist()
-                    
+      
         assert phase in ['train','val','test']
         ########################################
         # training
@@ -345,13 +324,16 @@ class RegistrationTrainer(TrainerInit):
                 tgt_batch_F.to(self.device),
                 coordinates=tgt_batch_C.to(self.device))
 
-            Transform_pred, votes= \
+            Transform_pred, votes, confidence= \
                 self.PoseEstimator(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, self.model)
+
+            """ Transform_pred, votes= \
+                self.model(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1) """
 
             rotation_ab, translation_ab = decompose_rotation_translation(transform_ab.to(self.device))
             rotation_pred, translation_pred = decompose_rotation_translation(Transform_pred.to(self.device))
 
-            #draw_registration_result(pcd0_xyz, pcd1_xyz, Transform_pred)
+            # Hough Voting
             hspace = votes
             del votes
 
@@ -376,10 +358,13 @@ class RegistrationTrainer(TrainerInit):
 
             # criteria = BalancedLoss()
             criteria = torch.nn.BCEWithLogitsLoss()
-            loss = criteria(hspace.F, target)
-
-            #trans_loss , rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred, alpha = 2)
-            #loss = vote_loss + trans_loss
+            vote_loss = criteria(hspace.F, target)
+            
+            rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred, alpha = 2)
+            
+            #corr_loss = corrcofidence_loss(over_corr, over_xyz0, over_xyz1, confidence)
+            
+            loss = (vote_loss * 0.01) + (rotation_loss * 3.8) + (translation_loss * 3.8)
 
             loss_float = loss.detach().cpu().item()
 
@@ -409,17 +394,19 @@ class RegistrationTrainer(TrainerInit):
                     tgt_batch_F.to(self.device),
                     coordinates=tgt_batch_C.to(self.device))
 
-                Transform_pred, votes = \
+                Transform_pred, votes, confidence = \
                     self.PoseEstimator(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, self.model )
                 
-                
+                """ Transform_pred, votes= \
+                self.model(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1) """
+
                 rotation_ab, translation_ab = decompose_rotation_translation(transform_ab.to(self.device))
                 rotation_pred, translation_pred = decompose_rotation_translation(Transform_pred.to(self.device))
 
                 success, rte, rre = rte_rre(
                     Transform_pred.cpu().numpy(), transform_ab.cpu().numpy(), self.rte_thresh, self.rre_thresh
                 )
-
+                
                 #loss, rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred, alpha = 2)
                 #loss_float = loss.detach().cpu().item()
 
@@ -453,7 +440,7 @@ class RegistrationTrainer(TrainerInit):
         batch_size = self.batch_size
         num_iter = int((len(data_loader) // batch_size))
 
-        for curr_iter in tqdm(range(num_iter)):
+        for curr_iter in track(range(num_iter)):
 
             input_dict = data_loader_iter.next()
             inputs = dict()
@@ -492,6 +479,7 @@ class RegistrationTrainer(TrainerInit):
 
             if (phase == 'train'):
                 total_loss /= self.batch_size
+            
             total_recall /= self.batch_size
             total_rte /= self.batch_size
             total_rre /= self.batch_size
