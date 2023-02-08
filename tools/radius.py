@@ -15,23 +15,6 @@ from faiss.contrib.torch_utils import (
 res = faiss.StandardGpuResources()
 
 
-#------------------------------------------------------------------------------
-def compute_graph_nn(xyz, k_nn):
-    """compute the knn graph"""
-    
-    num_ver = xyz.shape[0]
-    graph = dict([("is_nn", True)])
-    nn = NearestNeighbors(n_neighbors=k_nn+1, algorithm='kd_tree').fit(xyz)
-    distances, neighbors = nn.kneighbors(xyz)
-    neighbors = neighbors[:, 1:]
-    distances = distances[:, 1:]
-    source = npm.repmat(range(0, num_ver), k_nn, 1).flatten(order='F')
-    #save the graph
-    graph["source"] = source.flatten().astype('int64')
-    graph["target"] = neighbors.flatten().astype('int64')
-    graph["distances"] = distances.flatten().astype('float32')
-    return graph
-
 def _hash(arr, M=None):
     if isinstance(arr, np.ndarray):
         N, D = arr.shape
@@ -169,15 +152,3 @@ def feature_matching(F0, F1, knn=1, mutual=True):
 
     torch.cuda.empty_cache()
     return matches
-
-def feat_match(src, tgt, F0, F1, knn=10):
-
-    N, C = F0.shape
-
-    dist, index = find_knn_gpu(F0,F1, return_distance=True)
-
-    bidx = torch.arange(N).view(N,-1)
-    bidx = bidx.expand_as(index).contiguous()
-
-    corr = F0
-    return dist, index

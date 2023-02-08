@@ -15,6 +15,7 @@ class SimpleNet(ME.MinkowskiNetwork):
 
   # To use the model, must call initialize_coords before forward pass.
   # Once data is processed, call clear to reset the model before calling initialize_coords
+  
   def __init__(self,
         in_channels=1,
         out_channels=1,

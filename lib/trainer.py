@@ -20,7 +20,7 @@ from tools.file import ensure_dir
 from tools.transform_estimation import rotation_to_axis_angle
 from tools.utils import Logger
 from tools.transforms import decompose_rotation_translation
-from lib.loss import transformation_loss, corrcofidence_loss
+from lib.loss import transformation_loss
 from lib.timer import AverageMeter
 
 logging.getLogger().setLevel(logging.INFO)
@@ -58,12 +58,11 @@ class TrainerInit:
         self.get_loss = loss
         self.voxel_size = config.voxel_size
         self.max_epoch = config.max_epoch
-        self.save_freq = config.save_freq_epoch
+
         self.batch_size = config.batch_size
         self.verbose = config.verbose
         self.PoseEstimator = PoseEstimator(config).to(self.device)
 
-        self.val_max_iter = config.val_max_iter
         self.val_epoch_freq = config.val_epoch_freq
         self.verbose_freq= config.verbose_freq
 
@@ -253,7 +252,6 @@ class RegistrationTrainer(TrainerInit):
             model, optimizer, scheduler, loss)
         self.neg_thresh = config.neg_thresh
         self.pos_thresh = config.pos_thresh
-        self.neg_weight = config.neg_weight
 
         self.alpha = config.alpha
         self.beta = config.beta
@@ -360,14 +358,12 @@ class RegistrationTrainer(TrainerInit):
             criteria = torch.nn.BCEWithLogitsLoss()
             vote_loss = criteria(hspace.F, target)
             
-            rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred, alpha = 2)
+            rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred)
             
             #corr_loss = corrcofidence_loss(over_corr, over_xyz0, over_xyz1, confidence)
             
-            loss = (vote_loss * 0.01) + (rotation_loss * 3.5) + (translation_loss * 3.5)
+            loss = (vote_loss * self.alpha) + (rotation_loss  + translation_loss) * self.beta
 
-            #loss = vote_loss + corr_loss * 1.0
-            
             loss_float = loss.detach().cpu().item()
 
             success, rte, rre = rte_rre(
@@ -409,7 +405,7 @@ class RegistrationTrainer(TrainerInit):
                     Transform_pred.cpu().numpy(), transform_ab.cpu().numpy(), self.rte_thresh, self.rre_thresh
                 )
                 
-                #loss, rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred, alpha = 2)
+                #loss, rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred)
                 #loss_float = loss.detach().cpu().item()
 
                 values = dict(

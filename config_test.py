@@ -31,7 +31,7 @@ dgf_arg.add_argument('--ff_dims', type=int, default=32, metavar='N',
                         help='Num of dimensions of fc in transformer')
 dgf_arg.add_argument('--conv1_kernel_size', type=int, default=5)
 dgf_arg.add_argument('--conv2_kernel_size', type=int, default=3)
-dgf_arg.add_argument('--alpha_factor', type=float, default=4)
+
 dgf_arg.add_argument('--eps', type=float, default=1e-12)
 dgf_arg.add_argument('--dist_type', type=str, default='L2')
 dgf_arg.add_argument('--best_val_metric1', type=str, default='loss')
@@ -94,7 +94,7 @@ misc_arg.add_argument(
     help='The maximum number of features to find nearest neighbors in batch')
 
 data_arg = add_argument_group('Data')
-data_arg.add_argument('--dataset', type=str, default='ThreeDMatchTestDataset')
+data_arg.add_argument('--dataset', type=str, default='ThreeDLoMatchTestDataset')
 data_arg.add_argument('--descriptor', type=str, default='predator')
 data_arg.add_argument("--run_name",default="test", type=str, required=False, help="experiment title")
 

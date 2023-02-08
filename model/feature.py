@@ -1,15 +1,12 @@
 import logging
 import os
 from abc import ABC
-from platform import architecture
 
-import gin
-import MinkowskiEngine as ME
+
 import numpy as np
 import open3d as o3d
 import torch
 
-from easydict import EasyDict as edict
 from model import load_model
 
 
@@ -21,7 +18,7 @@ class BaseFeatureExtractor(ABC):
         raise NotImplementedError("Feature should implement extract_feature method.")
 
 
-@gin.configurable()
+
 class FCGF(BaseFeatureExtractor):
     def __init__(self, config ):
         super().__init__()
@@ -44,23 +41,6 @@ class FCGF(BaseFeatureExtractor):
             param.requires_grad = False
     @ torch.no_grad()
     def extract_feature(self, sinput):
-        """ if coords is None or feats is None:
-            # quantize input xyz.
-            coords, sel = ME.utils.sparse_quantize(
-                xyz / self.voxel_size, return_index=True
-            )
-
-            # make sparse tensor.
-            coords = ME.utils.batched_coordinates([coords])
-            feats = torch.ones((coords.shape[0], 1)).float()
-            sinput = ME.SparseTensor(
-                feats.to(self.device), coordinates=coords.to(self.device)
-            )
-            if isinstance(xyz, np.ndarray):
-                xyz = torch.from_numpy(xyz)
-            xyz = xyz[sel].float().to(self.device)
-        else:
-            sinput = ME.SparseTensor(coordinates=coords, features=feats) """
 
         # extract feature.
         F = self.feat_model(sinput).F
@@ -68,7 +48,7 @@ class FCGF(BaseFeatureExtractor):
         return F
 
 
-@gin.configurable()
+
 class FPFH(BaseFeatureExtractor):
     def __init__(self, voxel_size):
         super().__init__()
@@ -101,7 +81,7 @@ class FPFH(BaseFeatureExtractor):
         F = torch.from_numpy(pcd_fpfh.data.copy().T).float().contiguous()
         return F, xyz
 
-@gin.configurable()
+
 class Predator(BaseFeatureExtractor):
     def __init__(self, config ):
 
@@ -130,7 +110,7 @@ class Predator(BaseFeatureExtractor):
 MODELS = [FPFH, FCGF, Predator]
 
 
-@gin.configurable()
+
 def get_feature(name):
     # Find the model class from its name
     all_models = MODELS

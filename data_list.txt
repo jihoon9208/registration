@@ -1,3 +1,0 @@
-filename0 : 7-scenes-redkitchen/cloud_bin_0.ply
-filename1 : 7-scenes-redkitchen/cloud_bin_18.ply
-recall : 1.0 RTE : 1.31 RRE :0.4

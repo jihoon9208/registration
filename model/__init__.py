@@ -1,7 +1,6 @@
 import logging
 import model.simpleunet as simpleunets
 import model.resunet as resunets
-import model.originresunet as orgin
 import model.predator as predator
 
 MODELS = []
@@ -10,8 +9,7 @@ def add_models(module):
     MODELS.extend([getattr(module, a) for a in dir(module) if 'Net' in a or 'MLP' in a])
 
 add_models(simpleunets)
-#add_models(resunets)
-add_models(orgin)
+add_models(resunets)
 #add_models(predator)
 
 def load_model(name):

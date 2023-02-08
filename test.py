@@ -134,7 +134,7 @@ def run_benchmark(
             filename0 = f0.split('/')[-1]
             filename1 = f1.split('/')[-1]
 
-            if float(recall) > 80 and float(rte) < 5 and float(rre) < 2.5 :
+            if float(recall) == 1 and float(rte) < 1.5 and float(rre) < 1 :
                 with open("./data_list.txt", "a") as f:
                     f.write("filename0 : " + sname + "/" + filename0 + '\n' 
                         "filename1 : " + sname + "/" + filename1 + '\n'
@@ -150,11 +150,12 @@ def run_benchmark(
                     f"recall: {cur_recall:.2f}, rte: {cur_rte:.2f}, rre: {cur_rre:.2f}"
                 )
 
+    return subset_names, stats, np.stack(poses, axis=0)
 
 def test(args):
 
     ensure_dir(args.target)
-    checkpoint = torch.load(args.model)
+    checkpoint = torch.load(args.model,map_location='cpu')
     config = checkpoint['config']
 
     # initialize Model

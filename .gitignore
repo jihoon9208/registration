@@ -21,3 +21,7 @@ data/
 *.zip
 *.log
 *.info
+*.json
+*.png
+*.jpg
+*.gif

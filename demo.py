@@ -30,7 +30,7 @@ from lib.benchmark_utils import ransac_pose_estimation, to_o3d_pcd, get_blue, ge
 import shutil
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ['CUDA_VISIBLE_DEVICES'] = "1"
 
 class ThreeDMatchDemo(Dataset):
     """
@@ -197,7 +197,7 @@ def main(config, demo_loader, model):
     with torch.no_grad():
         for batch_idx in track(range(tot_num_data)):
             batch = c_loader_iter.next()
-            sname, xyz0, xyz1, trans, file0, file1 = batch[0]
+            sname, xyz0, xyz1, trans, f0, f1 = batch[0]
             T_gt = np.linalg.inv(trans)
 
             sinput0, sinput1, src_over, tgt_over, over_index0, over_index1 = datasets_setting(xyz0, xyz1, T_gt, voxel_size, overlap, device)
@@ -212,7 +212,18 @@ def main(config, demo_loader, model):
             rte = str(round(result[1],2))
             rre = str(round(result[2],2))
 
-            if float(recall) == 1 and float(rte) < 1 and float(rre) < 1.5 :
+            filename0 = f0.split('/')[-1]
+            filename1 = f1.split('/')[-1]
+
+            """ if float(recall) == 1 and float(rte) < 2 and float(rre) < 1.5 :
+                with open("./data_list.txt", "a") as f:
+                    f.write("filename0 : " + sname + "/" + filename0 + '\n' 
+                        "filename1 : " + sname + "/" + filename1 + '\n'
+                        + "recall : " + recall + " RTE : " + rte +  " RRE :" + rre + '\n')
+           
+            """                
+            if sname=="7-scenes-redkitchen" and filename0=="cloud_bin_23.ply" and filename1=="cloud_bin_39.ply":
+            
                 draw_registration_result(xyz0, xyz1, over_index0, over_index1, T)
 
 

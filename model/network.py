@@ -12,49 +12,16 @@ import MinkowskiEngine as ME
 
 from torch_batch_svd import svd as fast_svd
 
-
-from model.resunet import SparseResNet
-from model.originresunet import ResUNetBN2C
+from model.resunet import ResUNetBN2C
 from model.simpleunet import SimpleNet
 
 from tools.radius import feature_matching
 from tools.transform_estimation import sparse_gaussian, axis_angle_to_rotation, rotation_to_axis_angle
-from lib.timer import random_quad
+from lib.timer import random_quad, random_triplet
 from model.feature import FCGF, FPFH ,Predator
 from tools.utils import  square_distance
-from tools.pointcloud import draw_registration_result
 
 
-class EmbeddingFeatureFull(ME.MinkowskiNetwork):
-    def __init__(self, config):
-        self.config = config
-        super().__init__(D=3)
-
-        self.voxel_size = config.voxel_size
-    
-        num_feats = 1
-
-        """ self.SparseResNet = SparseResNet(
-            self.config, 
-            num_feats,
-            config.sparse_dims,
-            bn_momentum=config.bn_momentum,
-            conv1_kernel_size=config.conv1_kernel_size,
-            D=3).cuda() """
-
-        self.SparseResNet = ResUNetBN2C(
-            num_feats,
-            config.sparse_dims,
-            bn_momentum=config.bn_momentum,
-            normalize_feature=True,
-            conv1_kernel_size=config.conv1_kernel_size,
-            D=3).cuda()
-
-    def forward(self, full_pcd):
-        
-        sparse_feat = self.SparseResNet(full_pcd)
-
-        return sparse_feat
 
 class PoseEstimator(ME.MinkowskiNetwork):
     def __init__(self, config):
@@ -67,8 +34,6 @@ class PoseEstimator(ME.MinkowskiNetwork):
         self.t_binsize = config.t_binsize
         self.smoothing = True
         self.kernel_size = 5
-    
-        self.full_embed = EmbeddingFeatureFull(self.config)
 
         self.feature_extraction = FCGF(self.config)
         #self.feature_extraction = FPFH(self.voxel_size)
@@ -142,7 +107,7 @@ class PoseEstimator(ME.MinkowskiNetwork):
         lj = torch.norm(xyz1_sel - xyz1_sel.roll(1, 1), p=2, dim=2)
 
         triangle_check = torch.all(
-            torch.abs(li - lj) < 2.5 * self.voxel_size, dim=1
+            torch.abs(li - lj) < 3 * self.voxel_size, dim=1
         ).cpu()
         dup_check = torch.logical_and(
             torch.all(li > self.voxel_size * 1.5, dim=1),
@@ -241,16 +206,13 @@ class PoseEstimator(ME.MinkowskiNetwork):
 
         gc.collect()
 
-        xyz0 = full_pcd0.C[:,1:] * self.voxel_size
-        xyz1 = full_pcd1.C[:,1:] * self.voxel_size
-
         # FCGF
         full_out0 = self.feature_extraction.extract_feature(full_pcd0)
         full_out1 = self.feature_extraction.extract_feature(full_pcd1)
 
         # FHFP
-        #full_out0, xyz0 = self.feature_extraction.extract_feature(xyz0.detach().cpu().numpy())
-        #full_out1, xyz1 = self.feature_extraction.extract_feature(xyz1.detach().cpu().numpy())
+        #full_out0, xyz0 = self.feature_extraction.extract_feature((full_pcd0.C[:,1:] * self.voxel_size).detach().cpu().numpy())
+        #full_out1, xyz1 = self.feature_extraction.extract_feature((full_pcd1.C[:,1:] * self.voxel_size).detach().cpu().numpy())
 
         # Predator
         #full_out0, full_out1 = self.feature_extraction.extract_feature(full_pcd0, full_pcd1)

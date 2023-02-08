@@ -9,6 +9,12 @@ def random_quad(high, size):
     quadist = quadist[local_dup_check]
     return quadist
 
+def random_triplet(high, size):
+    quadist = torch.randint(low=0, high=high, size=(int(size * 1.2), 3))
+    local_dup_check = (quadist - quadist.roll(1, 1) != 0).all(dim=1)
+    quadist = quadist[local_dup_check]
+    return quadist
+
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

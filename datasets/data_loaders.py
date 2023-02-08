@@ -4,9 +4,6 @@ import logging
 
 import torch
 import torch.utils.data
-import numpy as np
-
-from scipy.linalg import expm, norm
 
 import tools.transforms as t
 from.collate import CollateFunc as coll

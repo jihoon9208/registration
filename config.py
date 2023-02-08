@@ -5,13 +5,13 @@ parser = argparse.ArgumentParser()
 
 
 def add_argument_group(name):
-  arg = parser.add_argument_group(name)
-  arg_lists.append(arg)
-  return arg
+    arg = parser.add_argument_group(name)
+    arg_lists.append(arg)
+    return arg
 
 
 def str2bool(v):
-  return v.lower() in ('true', '1')
+    return v.lower() in ('true', '1')
 
 logging_arg = add_argument_group('Logging')
 logging_arg.add_argument('--out_dir', type=str, default='outputs')
@@ -19,26 +19,17 @@ logging_arg.add_argument('--snapshot_dir', type=str, default='outputs/snapshot')
 
 trainer_arg = add_argument_group('Trainer')
 trainer_arg.add_argument('--trainer', type=str, default='RegistrationTrainer')
-trainer_arg.add_argument('--save_freq_epoch', type=int, default=1)
 trainer_arg.add_argument('--batch_size', type=int, default=8)
 trainer_arg.add_argument('--val_batch_size', type=int, default=1)
 
 # Metric learning loss
 trainer_arg.add_argument('--neg_thresh', type=float, default=1.4)
 trainer_arg.add_argument('--pos_thresh', type=float, default=0.1)
-trainer_arg.add_argument('--alpha', type=float, default=1.5)
-trainer_arg.add_argument('--beta', type=float, default=0.1)
-
+trainer_arg.add_argument('--alpha', type=float, default=0.01)
+trainer_arg.add_argument('--beta', type=float, default=3)
 trainer_arg.add_argument('--rte_thresh', type=int, default=30)
 trainer_arg.add_argument('--rre_thresh', type=int, default=15)
-
-trainer_arg.add_argument('--neg_weight', type=float, default=1)
-trainer_arg.add_argument('--log_scale', type=float, default=24)
-trainer_arg.add_argument('--pos_radius', type=float, default=0.0375)
-trainer_arg.add_argument('--safe_radius', type=float, default=1)
 trainer_arg.add_argument('--overlap_radius', type=float, default=0.0375)
-trainer_arg.add_argument('--matchability_radius', type=float, default=0.05)
-trainer_arg.add_argument('--max_points', type=int, default=256)
 
 # Data augmentation
 trainer_arg.add_argument('--use_random_scale', type=str2bool, default=False)
@@ -53,46 +44,39 @@ trainer_arg.add_argument('--sample_num_points', type=int, default=512)
 trainer_arg.add_argument('--train_phase', type=str, default="train")
 trainer_arg.add_argument('--val_phase', type=str, default="val")
 trainer_arg.add_argument('--test_phase', type=str, default="test")
-trainer_arg.add_argument('--stat_freq', type=int, default=40)
 trainer_arg.add_argument('--test_valid', type=str2bool, default=True)
-trainer_arg.add_argument('--val_max_iter', type=int, default=400)
-trainer_arg.add_argument('--val_epoch_freq', type=int, default=1)
 trainer_arg.add_argument(
     '--positive_pair_search_voxel_size_multiplier', type=float, default=1.5)
-trainer_arg.add_argument('--hit_ratio_thresh', type=float, default=0.1)
 
-# dNetwork specific configurations
-dgf_arg = add_argument_group('Network')
-dgf_arg.add_argument('--model', type=str, default='ResUNetBN2C')
-dgf_arg.add_argument('--sparse_dims', type=int, default=32, help='Feature dimension')
-dgf_arg.add_argument('--emb_dims', type=int, default=32, metavar='N',help='Dimension of embeddings')
-dgf_arg.add_argument('--dropout', type=float, default=0.0, metavar='N',
+# Network specific configurations
+
+network_arg = add_argument_group('Network')
+network_arg.add_argument('--model', type=str, default='ResUNetBN2C')
+network_arg.add_argument('sparse_dims', type=int, default=32, help='Feature dimension')
+network_arg.add_argument('--conv1_kernel_size', type=int, default=5)
+network_arg.add_argument('--eps', type=float, default=1e-12)
+network_arg.add_argument('--dropout', type=float, default=0.0, metavar='N',
                         help='Dropout ratio in transformer')
 
-dgf_arg.add_argument('--ff_dims', type=int, default=32, metavar='N',
-                        help='Num of dimensions of fc in transformer')
-dgf_arg.add_argument('--conv1_kernel_size', type=int, default=5)
-dgf_arg.add_argument('--conv2_kernel_size', type=int, default=7)
-dgf_arg.add_argument('--alpha_factor', type=float, default=4)
-dgf_arg.add_argument('--eps', type=float, default=1e-12)
-
 # Predator
-dgf_arg.add_argument('--in_feats_dim', type=int, default=1)
-dgf_arg.add_argument('--out_feats_dim', type=int, default=32)
-dgf_arg.add_argument('--gnn_feats_dim', type=int, default=256)
-dgf_arg.add_argument('--num_head', type=int, default=4, metavar='N',
+network_arg.add_argument('--in_feats_dim', type=int, default=1)
+network_arg.add_argument('--out_feats_dim', type=int, default=32)
+network_arg.add_argument('--gnn_feats_dim', type=int, default=256)
+network_arg.add_argument('--num_head', type=int, default=4, metavar='N',
                         help='Num of heads in multiheadedattention')
-dgf_arg.add_argument('--dgcnn_k', type=int, default=10)
-dgf_arg.add_argument('--nets', type=str, default=['self','cross','self'])
-dgf_arg.add_argument('--dist_type', type=str, default='L2')
-dgf_arg.add_argument('--normalize_feature', type=str2bool, default='True')
+network_arg.add_argument('--dgcnn_k', type=int, default=10)
+network_arg.add_argument('--nets', type=str, default=['self','cross','self'])
+network_arg.add_argument('--dist_type', type=str, default='L2')
+network_arg.add_argument('--normalize_feature', type=str2bool, default='True')
+network_arg.add_argument('--best_val_metric', type=str, default='recall')
 
-dgf_arg.add_argument('--best_val_metric', type=str, default='recall')
-dgf_arg.add_argument('--k_nn_geof', default=32, type=int, help='number of neighbors to describe the local geometry')
 
-dgf_arg.add_argument('--num_trial', default=100000, type=int)
-dgf_arg.add_argument('--r_binsize', default=0.02, type=float)
-dgf_arg.add_argument('--t_binsize', default=0.02, type=float)
+network_arg.add_argument('--k_nn_geof', default=32, type=int, help='number of neighbors to describe the local geometry')
+
+
+network_arg.add_argument('--num_trial', default=100000, type=int)
+network_arg.add_argument('--r_binsize', default=0.02, type=float)
+network_arg.add_argument('--t_binsize', default=0.02, type=float)
 
 # Attention specific configurations
 att_arg = add_argument_group('Attention')
@@ -104,7 +88,6 @@ opt_arg = add_argument_group('Optimizer')
 opt_arg.add_argument('--optimizer', type=str, default='Adam')
 opt_arg.add_argument('--max_epoch', type=int, default=10)
 opt_arg.add_argument('--lr', type=float, default=1e-3)
-#opt_arg.add_argument('--lr', type=float, default=2e-1)
 opt_arg.add_argument('--momentum', type=float, default=0.9)
 opt_arg.add_argument('--sgd_momentum', type=float, default=0.9)
 opt_arg.add_argument('--sgd_dampening', type=float, default=0.1)
@@ -138,10 +121,6 @@ misc_arg.add_argument(
 
 data_arg = add_argument_group('Data')
 data_arg.add_argument('--dataset', type=str, default='ThreeDMatchPairDataset')
-data_arg.add_argument('--train_info', type=str, default='./datasets/split/over/train_info.pkl')
-data_arg.add_argument('--val_info', type=str, default='./datasets/split/over/val_info.pkl')
-data_arg.add_argument('--test_full_info', type=str, default='./datasets/split/over/3DMatch.pkl')
-data_arg.add_argument('--test_low_info', type=str, default='./datasets/split/over/3DLoMatch.pkl')
 data_arg.add_argument('--augment_noise', type=float, default=0.005)
 
 data_arg.add_argument('--voxel_size', type=float, default=0.05)

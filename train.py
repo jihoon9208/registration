@@ -1,26 +1,21 @@
 # -*- coding: future_fstrings -*-
-from turtle import clear
-import open3d as o3d  # prevent loading error
+
 import os
-import sys
 import json
 import logging
 import torch
 from easydict import EasyDict as edict
-from model import load_model
-from model.network import PoseEstimator
-from model.simpleunet import SimpleNet
 
-from datasets.data_loaders import make_data_loader
 from config import get_config
 import torch.optim as optim
-from datasets.collate import CollateFunc as coll
+
+from datasets.data_loaders import make_data_loader
+from model.simpleunet import SimpleNet
 from lib.trainer import RegistrationTrainer
 from lib.loss import MetricLoss
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-torch.multiprocessing.set_sharing_strategy('file_system')
 
 
 def get_trainer(trainer):
@@ -89,6 +84,8 @@ def main(config, resume=False):
                                         collate_fn=coll.collate_pair_fn,
                                         pin_memory=False,
                                         drop_last=False) """
+
+    # 3DMatch and KITTI Dataset follow
 
     train_loader = make_data_loader(
         config,
