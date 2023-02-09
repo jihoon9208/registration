@@ -2,29 +2,26 @@ import argparse
 import logging
 import os
 import time
-import open3d as o3d
-from lib.timer import Timer, AverageMeter
-from easydict import EasyDict as edict
 import torch
 import numpy as np
+from easydict import EasyDict as edict
+
 from rich.console import Console
 from rich.progress import track
 from rich.table import Table
 
 from config_test import get_config
+from datasets.threedmatch_dataset import ThreeDMatchTestDataset
+from datasets.data_loaders import make_data_loader
+
 from model.network import PoseEstimator
 from model.simpleunet import SimpleNet
-
-from datasets.data_loaders import make_data_loader
-from datasets.collate import CollateFunc as coll
+from lib.timer import Timer, AverageMeter
 
 from tools.file import ensure_dir
-from datasets.threedmatch_dataset import ThreeDMatchTestDataset
 from tools.test_utils import datasets_setting
-from tools.pointcloud import draw_registration_result, draw_point_cloud
+from tools.utils import rte_rre
 
-from model import load_model
-import MinkowskiEngine as ME
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
@@ -65,24 +62,6 @@ def print_table(subset_names, stats, rte_ths, rre_ths):
     metrics[0] = recall
     table.add_row("avg", *[f"{m:.4f}" for m in metrics])
     console.print(table)
-
-
-def rte_rre(T_pred, T_gt, rte_thresh, rre_thresh, eps=1e-8):
-    if T_pred is None:
-        return np.array([0, np.inf, np.inf])
-
-    rte = np.linalg.norm(T_pred[:3, 3] - T_gt[:3, 3]) * 100
-    rre = (
-        np.arccos(
-            np.clip(
-                (np.trace(T_pred[:3, :3].T @ T_gt[:3, :3]) - 1) / 2, -1 + eps, 1 - eps
-            )
-        )
-        * 180
-        / np.pi
-    )
-    return np.array([rte < rte_thresh and rre < rre_thresh, rte, rre])
-
 
 def run_benchmark(
     data_loader,
@@ -126,7 +105,6 @@ def run_benchmark(
             stats[batch_idx, 4] = sid
             poses.append(T.numpy())
 
-
             recall = str(round(result[0],2))
             rte = str(round(result[1],2))
             rre = str(round(result[2],2))
@@ -140,7 +118,6 @@ def run_benchmark(
                         "filename1 : " + sname + "/" + filename1 + '\n'
                         + "recall : " + recall + " RTE : " + rte +  " RRE :" + rre + '\n')
            
-
             if batch_idx % log_interval == 0 and batch_idx > 0:
                 cur_stats = stats[:batch_idx]
                 cur_recall = cur_stats[:, 0].mean() * 100
@@ -162,15 +139,13 @@ def test(args):
     search_voxel_size = config.voxel_size * config.positive_pair_search_voxel_size_multiplier
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    num_feats = 1
     model = SimpleNet(
             conv1_kernel_size=config.conv1_kernel_size,
             D=6)
+            
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
   
-    timer, tmeter = Timer(), AverageMeter()
-
     # initialize data loader
     test_loader = make_data_loader(
         args,

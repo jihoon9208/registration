@@ -37,8 +37,7 @@ trainer_arg.add_argument('--min_scale', type=float, default=0.8)
 trainer_arg.add_argument('--max_scale', type=float, default=1.2)
 trainer_arg.add_argument('--use_random_rotation', type=str2bool, default=False)
 trainer_arg.add_argument('--rotation_range', type=float, default=360)
-trainer_arg.add_argument('--num_points', type=int, default=4096)
-trainer_arg.add_argument('--sample_num_points', type=int, default=512)
+
 
 # Data loader configs
 trainer_arg.add_argument('--train_phase', type=str, default="train")
@@ -48,11 +47,14 @@ trainer_arg.add_argument('--test_valid', type=str2bool, default=True)
 trainer_arg.add_argument(
     '--positive_pair_search_voxel_size_multiplier', type=float, default=1.5)
 
+
 # Network specific configurations
 
 network_arg = add_argument_group('Network')
 network_arg.add_argument('--model', type=str, default='ResUNetBN2C')
-network_arg.add_argument('sparse_dims', type=int, default=32, help='Feature dimension')
+network_arg.add_argument('--model_select', type=str, default='sum')
+
+network_arg.add_argument('--sparse_dims', type=int, default=32, help='Feature dimension')
 network_arg.add_argument('--conv1_kernel_size', type=int, default=5)
 network_arg.add_argument('--eps', type=float, default=1e-12)
 network_arg.add_argument('--dropout', type=float, default=0.0, metavar='N',
@@ -70,10 +72,6 @@ network_arg.add_argument('--dist_type', type=str, default='L2')
 network_arg.add_argument('--normalize_feature', type=str2bool, default='True')
 network_arg.add_argument('--best_val_metric', type=str, default='recall')
 
-
-network_arg.add_argument('--k_nn_geof', default=32, type=int, help='number of neighbors to describe the local geometry')
-
-
 network_arg.add_argument('--num_trial', default=100000, type=int)
 network_arg.add_argument('--r_binsize', default=0.02, type=float)
 network_arg.add_argument('--t_binsize', default=0.02, type=float)
@@ -87,7 +85,7 @@ att_arg.add_argument('--kernel_size', type=int, default=16)
 opt_arg = add_argument_group('Optimizer')
 opt_arg.add_argument('--optimizer', type=str, default='Adam')
 opt_arg.add_argument('--max_epoch', type=int, default=10)
-opt_arg.add_argument('--lr', type=float, default=1e-3)
+opt_arg.add_argument('--lr', type=float, default=1e-2)
 opt_arg.add_argument('--momentum', type=float, default=0.9)
 opt_arg.add_argument('--sgd_momentum', type=float, default=0.9)
 opt_arg.add_argument('--sgd_dampening', type=float, default=0.1)
@@ -103,9 +101,7 @@ opt_arg.add_argument(
 
 misc_arg = add_argument_group('Misc')
 misc_arg.add_argument('--use_gpu', type=str2bool, default=True)
-misc_arg.add_argument('--verbose', type=str2bool, default=True)
-misc_arg.add_argument('--verbose_freq', type=int, default=100)
-misc_arg.add_argument('--feat_weight', type=str, default='./weights/fcgf_3dmatch_50.pth')
+
 misc_arg.add_argument('--weights_dir', type=str, default=None)
 misc_arg.add_argument('--resume', type=str, default=None)
 misc_arg.add_argument('--resume_dir', type=str, default=None)
@@ -119,10 +115,12 @@ misc_arg.add_argument(
     default=500,
     help='The maximum number of features to find nearest neighbors in batch')
 
+# BackBone Network
+misc_arg.add_argument('--feat_weight', type=str, default='./weights/fcgf_3dmatch_50.pth')
+
+
 data_arg = add_argument_group('Data')
 data_arg.add_argument('--dataset', type=str, default='ThreeDMatchPairDataset')
-data_arg.add_argument('--augment_noise', type=float, default=0.005)
-
 data_arg.add_argument('--voxel_size', type=float, default=0.05)
 data_arg.add_argument(
     '--threed_match_dir', type=str, default="../Datasets/3dmatch/threedmatch")

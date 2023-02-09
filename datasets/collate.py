@@ -3,7 +3,6 @@
 
 import torch
 import numpy as np
-import MinkowskiEngine as ME
 
 from tools.utils import to_tensor 
 
@@ -17,9 +16,8 @@ class CollateFunc:
 
     def collate_pair_fn(list_data):
         xyz0, xyz1, coords0, coords1, feats0, feats1, xyz0_over, xyz1_over, \
-        over_coords0, over_coords1, over_feats0, over_feats1, over_index0, over_index1, \
-        matching_inds, over_matching_inds, trans, euler, scale = list(
-            zip(*list_data))
+        over_index0, over_index1, matching_inds, over_matching_inds, \
+        trans, euler, scale = list(zip(*list_data))
 
         src_batch0, tgt_batch1 = [], []
         src_over_xyz, tgt_over_xyz = [], [] 
@@ -72,13 +70,8 @@ class CollateFunc:
             'sinput0_C': coords0,
             'sinput0_F': feats0,
             'sinput1_C': coords1,
-            'sinput1_F': feats1,
-            'sover0_C' : over_coords0,
-            'sover0_F' : over_feats0,
-            'sover1_C' : over_coords1,
-            'sover1_F' : over_feats1,
+            'sinput1_F': feats1,    
             'correspondences': matching_inds_batch,
-            'over_correspondences': over_matching_inds_batch,
             'T_gt': trans,
             'scale': scale,
             'Euler_gt': euler,

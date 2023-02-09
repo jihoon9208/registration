@@ -17,8 +17,6 @@ class BaseFeatureExtractor(ABC):
     def extract_feature(self, xyz):
         raise NotImplementedError("Feature should implement extract_feature method.")
 
-
-
 class FCGF(BaseFeatureExtractor):
     def __init__(self, config ):
         super().__init__()
@@ -46,8 +44,6 @@ class FCGF(BaseFeatureExtractor):
         F = self.feat_model(sinput).F
 
         return F
-
-
 
 class FPFH(BaseFeatureExtractor):
     def __init__(self, voxel_size):

@@ -156,7 +156,7 @@ class CustomPairDataset(BasicDataset):
         feats0 = np.hstack(feats_train0)
         feats1 = np.hstack(feats_train1)
 
-        over_matching_inds = overlap_get_matching_indices(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), T_gt, matching_search_voxel_size)
+        over_matching_inds = overlap_get_matching_indices(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), T_gt)
         # overlap
         src_over_coords, tgt_over_coords = np.floor(src_over / self.voxel_size), np.floor(tgt_over / self.voxel_size) 
 

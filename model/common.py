@@ -1,5 +1,4 @@
 import MinkowskiEngine as ME
-import torch
 import torch.nn as nn
 
 def conv(

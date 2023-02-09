@@ -3,20 +3,19 @@
 import os
 import json
 import logging
-import torch
-from easydict import EasyDict as edict
 
-from config import get_config
+from easydict import EasyDict as edict
 import torch.optim as optim
 
+from config import get_config
+
 from datasets.data_loaders import make_data_loader
-from model.simpleunet import SimpleNet
 from lib.trainer import RegistrationTrainer
-from lib.loss import MetricLoss
+from model.simpleunet import SimpleNet
+from model.self_attention import SelfAttention
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
 
 def get_trainer(trainer):
     if trainer == 'RegistrationTrainer':
@@ -25,16 +24,18 @@ def get_trainer(trainer):
     else:
         raise ValueError(f'Trainer {trainer} not found')
 
-
 def main(config, resume=False):
 
     # Model initialization
-    
-    model = SimpleNet(
+    if config.model_select == 'attention':
+        model = SelfAttention(
+            feature_dim = 1, 
+            k = 10
+        )
+    elif config.model_select == 'sum' :
+        model = SimpleNet(
             conv1_kernel_size=config.conv1_kernel_size,
             D=6)
-
-    #model = PoseEstimator(config)
 
     if config.optimizer == 'SGD':
         optimizer = getattr(optim, config.optimizer)(
@@ -99,25 +100,15 @@ def main(config, resume=False):
         config.val_batch_size,
         num_threads=config.val_num_thread)
 
-    test_loader = make_data_loader(
-        config,
-        config.val_phase,
-        config.val_batch_size,
-        num_threads=config.val_num_thread)
-
-    get_loss = MetricLoss(config)
-
     Trainer = get_trainer(config.trainer)
 
     trainer = Trainer(
         config=config,
-        data_loader=train_loader,
+        train_data_loader=train_loader,
         val_data_loader=val_loader,
-        test_data_loader=test_loader,
         model=model,
         optimizer=optimizer,
-        scheduler=scheduler,
-        loss=get_loss
+        scheduler=scheduler
     )
 
     trainer.train()
@@ -127,6 +118,7 @@ if __name__ == "__main__":
     config = get_config()
 
     dconfig = vars(config)
+
     if config.resume_dir:
         resume_config = json.load(open(config.resume_dir + '/config.json', 'r'))
         for k in dconfig:

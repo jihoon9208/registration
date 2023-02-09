@@ -1,9 +1,3 @@
-# Copyright (c) Chris Choy (chrischoy@ai.stanford.edu) and Wei Dong (weidong@andrew.cmu.edu)
-#
-# Please cite the following papers if you use any part of the code.
-# - Christopher Choy, Wei Dong, Vladlen Koltun, Deep Global Registration, CVPR 2020
-# - Christopher Choy, Jaesik Park, Vladlen Koltun, Fully Convolutional Geometric Features, ICCV 2019
-# - Christopher Choy, JunYoung Gwak, Silvio Savarese, 4D Spatio-Temporal ConvNets: Minkowski Convolutional Neural Networks, CVPR 2019
 import torch
 import numpy as np
 import random
@@ -11,7 +5,7 @@ from scipy.linalg import expm, norm
 from sklearn.neighbors import NearestNeighbors
 from scipy.sparse import csr_matrix
 
-import open3d as o3d
+#import open3d as o3d
 
 def decompose_rotation_translation(Ts):
     
@@ -19,31 +13,6 @@ def decompose_rotation_translation(Ts):
     T = Ts[:3, 3]
 
     return R, T
-
-def voxelize(point_cloud, voxel_size):
-    # Random permutation (for random selection within voxel)
-    point_cloud = np.random.permutation(point_cloud)
-
-    # Set minimum value to 0 on each axis
-    min_val = point_cloud.min(0)
-    pc = point_cloud - min_val
-
-    # Quantize
-    pc = np.floor(pc / voxel_size)
-    L, M, N = pc.max(0) + 1
-    pc = pc[:, 0] + L * pc[:, 1] + L * M * pc[:, 2]
-
-    # Select voxel
-    _, idx = np.unique(pc, return_index=True)
-
-    return point_cloud[idx, :]
-
-def sample_points(pts, num_points):
-    if pts.shape[0] > num_points:
-        pts = np.random.permutation(pts)[:num_points]
-    else:
-        pts = np.random.permutation(pts)
-    return pts
 
 def ground_truth_attention( p1, p2, trans):
     
@@ -122,7 +91,6 @@ class Jitter:
             else:
                 feats += (torch.randn_like(feats) * self.sigma) + self.mu
         return coords, feats
-
 
 class ChromaticShift:
     def __init__(self, mu=0, sigma=0.1):

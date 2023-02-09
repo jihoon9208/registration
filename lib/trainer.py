@@ -7,6 +7,7 @@ import json
 
 from rich.progress import track
 import torch
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 from pytorch3d.transforms.rotation_conversions import matrix_to_euler_angles
 
@@ -14,11 +15,11 @@ from tensorboardX import SummaryWriter
 import MinkowskiEngine as ME
 
 #from model import load_model
-from lib.eval import rte_rre
+
 from model.network import PoseEstimator
 from tools.file import ensure_dir
-from tools.transform_estimation import rotation_to_axis_angle
-from tools.utils import Logger
+from tools.geometry import rotation_to_axis_angle
+from tools.utils import Logger, rte_rre
 from tools.transforms import decompose_rotation_translation
 from lib.loss import transformation_loss
 from lib.timer import AverageMeter
@@ -30,16 +31,12 @@ class TrainerInit:
     def __init__(
         self,
         config,
-        data_loader,
+        train_data_loader,
         val_data_loader=None,
-        test_data_loader=None,
         model = None,
         optimizer = None,
-        scheduler = None,
-        loss = None     
+        scheduler = None
     ):
-        num_feats = 1  # occupancy only for 3D Match dataset. For ScanNet, use RGB 3 channels.
-
         # Model initialization
 
         logging.info(model)
@@ -55,16 +52,11 @@ class TrainerInit:
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
-        self.get_loss = loss
+        
         self.voxel_size = config.voxel_size
         self.max_epoch = config.max_epoch
-
         self.batch_size = config.batch_size
-        self.verbose = config.verbose
         self.PoseEstimator = PoseEstimator(config).to(self.device)
-
-        self.val_epoch_freq = config.val_epoch_freq
-        self.verbose_freq= config.verbose_freq
 
         self.rte_thresh = config.rte_thresh
         self.rre_thresh = config.rre_thresh
@@ -87,23 +79,24 @@ class TrainerInit:
             sort_keys=False)
 
         self.iter_size = config.iter_size
-        self.batch_size = data_loader.batch_size
-        self.data_loader = data_loader
+        self.batch_size = train_data_loader.batch_size
+        self.train_data_loader = train_data_loader
         self.val_data_loader = val_data_loader
+        self.val_batch_size = val_data_loader.batch_size
 
         self.test_valid = True if self.val_data_loader is not None else False
-        self.log_step = int(np.sqrt(self.config.batch_size))
+        
         self.model = self.model.to(self.device)
         self.writer = SummaryWriter(logdir=config.out_dir)
         self.logger = Logger(config.snapshot_dir)
         self.logger.write(f'#parameters {sum([x.nelement() for x in self.model.parameters()])/1000000.} M\n')
 
-        self.get_loss = loss
-
         if config.resume is not None:
+
             if osp.isfile(config.resume):
                 logging.info("=> loading checkpoint '{}'".format(config.resume))
                 state = torch.load(config.resume)
+
                 self.start_epoch = state['epoch']
                 model.load_state_dict(state['state_dict'])
                 self.scheduler.load_state_dict(state['scheduler'])
@@ -120,9 +113,9 @@ class TrainerInit:
         Full training logic
         """
         # Baseline random feature performance
-        if self.test_valid:
-            """ with torch.no_grad():
-                val_dict = self.inference_one_epoch(0, 'val')
+        """ if self.test_valid:
+            with torch.no_grad():
+                val_dict = self.inference_one_epoch('val')
             for k, v in val_dict.items():
                 self.writer.add_scalar(f'val/{k}', v.avg, 0 ) """
                 
@@ -132,14 +125,14 @@ class TrainerInit:
             logging.info(f" Epoch: {epoch}, LR: {lr}")
             with torch.autograd.set_detect_anomaly(True):
                 train_dict, train_rotations_ab, train_translations_ab, train_rotations_ab_pred, \
-                    train_translations_ab_pred, train_eulers_ab =self.inference_one_epoch(epoch, 'train')
+                    train_translations_ab_pred, train_eulers_ab = self.inference_one_epoch('train')
 
             self._save_checkpoint(epoch)
             self.scheduler.step()
     
             with torch.no_grad():
                 val_dict, val_rotations_ab, val_translations_ab, val_rotations_ab_pred, \
-                    val_translations_ab_pred, val_eulers_ab = self.inference_one_epoch(epoch, 'val')
+                    val_translations_ab_pred, val_eulers_ab = self.inference_one_epoch('val')
 
             train_loss = train_dict['loss'].avg
             train_rre = train_dict['rre'].avg
@@ -150,24 +143,25 @@ class TrainerInit:
             
             train_rotations_ab_pred_euler = matrix_to_euler_angles(train_rotations_ab_pred, "ZYX")
             train_rotations_ab_pred_euler = train_rotations_ab_pred_euler.detach().cpu().numpy()
-            train_r_mse_ab = np.mean((train_rotations_ab_pred_euler -  np.degrees(train_eulers_ab)) ** 2)
+            train_r_mse_ab = np.mean((train_rotations_ab_pred_euler - np.degrees(train_eulers_ab)) ** 2)
             train_r_rmse_ab = np.sqrt(train_r_mse_ab)
-            train_r_mae_ab = np.mean(np.abs(train_rotations_ab_pred_euler -  np.degrees(train_eulers_ab)))
+            train_r_mae_ab = np.mean(np.abs(train_rotations_ab_pred_euler - np.degrees(train_eulers_ab)))
             train_t_mse_ab = np.mean((train_translations_ab - train_translations_ab_pred) ** 2)
             train_t_rmse_ab = np.sqrt(train_t_mse_ab)
             train_t_mae_ab = np.mean(np.abs(train_translations_ab - train_translations_ab_pred))
 
             val_rotations_ab_pred_euler = matrix_to_euler_angles(val_rotations_ab_pred, "ZYX")
             val_rotations_ab_pred_euler = val_rotations_ab_pred_euler.detach().cpu().numpy()
-            val_r_mse_ab = np.mean((val_rotations_ab_pred_euler -  np.degrees(val_eulers_ab)) ** 2)
+            val_r_mse_ab = np.mean((val_rotations_ab_pred_euler - np.degrees(val_eulers_ab)) ** 2)
             val_r_rmse_ab = np.sqrt(val_r_mse_ab)
-            val_r_mae_ab = np.mean(np.abs(val_rotations_ab_pred_euler -  np.degrees(val_eulers_ab)))
+            val_r_mae_ab = np.mean(np.abs(val_rotations_ab_pred_euler - np.degrees(val_eulers_ab)))
             val_t_mse_ab = np.mean((val_translations_ab - val_translations_ab_pred) ** 2)
             val_t_rmse_ab = np.sqrt(val_t_mse_ab)
             val_t_mae_ab = np.mean(np.abs(val_translations_ab - val_translations_ab_pred))
 
             ##########################################################
             # train write
+
             message = f'Train Epoch: {epoch} '
             for key,value in train_dict.items():
                 self.writer.add_scalar(f'Train/{key}', value.avg, epoch)
@@ -181,6 +175,7 @@ class TrainerInit:
             message += f'trans_MAE : {train_t_mae_ab:.6f}\t'
 
             self.logger.write(message+'\n')
+
             logging.info(
                 "Train Epoch: {} , ".format(epoch) +
                 "Loss : {:.6f}, rre: {:.6f}, rte: {:.6f}, rot_MSE: {:.6f}, rot_RMSE: {:.6f}, rot_MAE: {:.6f}, trans_MSE: {:.6f}, trans_RMSE: {:.6f}, trans_MAE: {:.6f}".format(
@@ -201,7 +196,9 @@ class TrainerInit:
             message += f'trans_MSE : {val_t_mse_ab:.6f}\t'
             message += f'trans_RMSE : {val_t_rmse_ab:.6f}\t'
             message += f'trans_MAE : {val_t_mae_ab:.6f}\t'
+
             self.logger.write(message+'\n')
+
             logging.info(
                 "Validation Epoch: {} , ".format(epoch)+
                 "rre: {:.6f}, rte: {:.6f}, rot_MSE: {:.6f}, rot_RMSE: {:.6f}, rot_MAE: {:.6f}, trans_MSE: {:.6f}, trans_RMSE: {:.6f}, trans_MAE: {:.6f}".format(
@@ -215,12 +212,14 @@ class TrainerInit:
                 self.best_val_recall = val_dict[self.best_val_metric].avg
                 self.best_val_epoch = epoch
                 self._save_checkpoint(epoch, 'best_val_recall_checkpoint')
+
             else:
                 logging.info(
                     f'Current best val model with {self.best_val_metric}: {self.best_val_recall} at epoch {self.best_val_epoch}'
                 )
 
     def _save_checkpoint(self, epoch, filename='checkpoint'):
+
         state = {
             'epoch': epoch,
             'state_dict': self.model.state_dict(),
@@ -231,58 +230,57 @@ class TrainerInit:
             'best_val_metric': self.best_val_metric,
             'best_val_epoch' : self.best_val_epoch
         }
+
         filename = os.path.join(self.checkpoint_dir, f'{filename}.pth')
         logging.info("Saving checkpoint: {} ...".format(filename))
         torch.save(state, filename)
 
 class RegistrationTrainer(TrainerInit):
+
     def __init__(self,
         config,
-        data_loader,
+        train_data_loader,
         val_data_loader=None,
-        test_data_loader=None,
         model = None,
         optimizer = None,
         scheduler = None,
-        loss = None     
     ):
         if val_data_loader is not None:
             assert val_data_loader.batch_size == 1, "Val set batch size must be 1 for now."
-        TrainerInit.__init__(self, config, data_loader, val_data_loader, test_data_loader, \
-            model, optimizer, scheduler, loss)
+        TrainerInit.__init__(self, config, train_data_loader, val_data_loader, \
+            model, optimizer, scheduler)
+
         self.neg_thresh = config.neg_thresh
         self.pos_thresh = config.pos_thresh
 
         self.alpha = config.alpha
         self.beta = config.beta
 
-    
-    def stats_dict_train(self):
-        stats=dict()
-        stats['loss'] = 0.
-        stats['recall'] = 0.
-        stats['rte'] = 0.
-        stats['rre'] = 0.
+    def stats_dict(self, phase):
 
-        return stats
-
-    def stats_dict_val(self):
         stats=dict()
-        stats['recall'] = 0.
-        stats['rte'] = 0.
-        stats['rre'] = 0.
-        
+
+        if (phase == "train"):
+            stats['loss'] = 0.
+            stats['recall'] = 0.
+            stats['rte'] = 0.
+            stats['rre'] = 0.
+
+        elif(phase == "val"):
+            stats['recall'] = 0.
+            stats['rte'] = 0.
+            stats['rre'] = 0.
+
         return stats
 
     def stats_meter(self, phase):
-        meters = dict()
 
-        if (phase == "train"):
-            stats = self.stats_dict_train()
-        else : 
-            stats = self.stats_dict_val()
+        meters = dict()
+        stats = self.stats_dict(phase)
+
         for key,_ in stats.items():
             meters[key]=AverageMeter()
+
         return meters
 
     def inference_one_batch(self, input_dict, phase):
@@ -295,9 +293,7 @@ class RegistrationTrainer(TrainerInit):
         tgt_feat = [input_dict['sinput1_F']]
 
         src_batch_C, src_batch_F = ME.utils.sparse_collate(src_coord, src_feat)
-        tgt_batch_C, tgt_batch_F = ME.utils.sparse_collate(tgt_coord, tgt_feat)
-
-        over_corr = input_dict['over_correspondences']        
+        tgt_batch_C, tgt_batch_F = ME.utils.sparse_collate(tgt_coord, tgt_feat) 
 
         transform_ab = torch.from_numpy(input_dict['T_gt'].astype(np.float32))
         eulers_ab = input_dict['Euler_gt']
@@ -306,6 +302,7 @@ class RegistrationTrainer(TrainerInit):
         over_index0, over_index1 = input_dict['over_index0'].int().tolist(), input_dict['over_index1'].int().tolist()
       
         assert phase in ['train','val','test']
+
         ########################################
         # training
         
@@ -322,11 +319,8 @@ class RegistrationTrainer(TrainerInit):
                 tgt_batch_F.to(self.device),
                 coordinates=tgt_batch_C.to(self.device))
 
-            Transform_pred, votes, confidence= \
+            Transform_pred, votes = \
                 self.PoseEstimator(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, self.model)
-
-            """ Transform_pred, votes= \
-                self.model(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1) """
 
             rotation_ab, translation_ab = decompose_rotation_translation(transform_ab.to(self.device))
             rotation_pred, translation_pred = decompose_rotation_translation(Transform_pred.to(self.device))
@@ -360,8 +354,6 @@ class RegistrationTrainer(TrainerInit):
             
             rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred)
             
-            #corr_loss = corrcofidence_loss(over_corr, over_xyz0, over_xyz1, confidence)
-            
             loss = (vote_loss * self.alpha) + (rotation_loss  + translation_loss) * self.beta
 
             loss_float = loss.detach().cpu().item()
@@ -392,21 +384,15 @@ class RegistrationTrainer(TrainerInit):
                     tgt_batch_F.to(self.device),
                     coordinates=tgt_batch_C.to(self.device))
 
-                Transform_pred, votes, confidence = \
+                Transform_pred, votes = \
                     self.PoseEstimator(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, self.model )
                 
-                """ Transform_pred, votes= \
-                self.model(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1) """
-
                 rotation_ab, translation_ab = decompose_rotation_translation(transform_ab.to(self.device))
                 rotation_pred, translation_pred = decompose_rotation_translation(Transform_pred.to(self.device))
 
                 success, rte, rre = rte_rre(
                     Transform_pred.cpu().numpy(), transform_ab.cpu().numpy(), self.rte_thresh, self.rre_thresh
                 )
-                
-                #loss, rotation_loss, translation_loss = transformation_loss(rotation_ab, translation_ab, rotation_pred, translation_pred)
-                #loss_float = loss.detach().cpu().item()
 
                 values = dict(
                     recall=success, rte=rte, rre=rre
@@ -414,7 +400,7 @@ class RegistrationTrainer(TrainerInit):
 
         return values, rotation_ab, translation_ab, rotation_pred, translation_pred, eulers_ab
 
-    def inference_one_epoch(self, epoch, phase):
+    def inference_one_epoch(self, phase):
         gc.collect()
 
         rotations_ab = []
@@ -428,14 +414,15 @@ class RegistrationTrainer(TrainerInit):
         stats_meter = self.stats_meter(phase)
 
         if (phase=='train'):
-            data_loader = self.data_loader
-            data_loader_iter = self.data_loader.__iter__()
-
+            data_loader = self.train_data_loader
+            data_loader_iter = self.train_data_loader.__iter__()
+            batch_size = self.batch_size
+            
         elif (phase =='val'):
             data_loader = self.val_data_loader
-            data_loader_iter = self.data_loader.__iter__()
+            data_loader_iter = self.val_data_loader.__iter__()
+            batch_size = self.val_batch_size
 
-        batch_size = self.batch_size
         num_iter = int((len(data_loader) // batch_size))
 
         for curr_iter in track(range(num_iter)):
@@ -449,7 +436,7 @@ class RegistrationTrainer(TrainerInit):
             ##################
             # forward pass 
             # with torch.autograd.detect_anomaly():
-            for i in range(self.batch_size):
+            for i in range(batch_size):
                 for k, v in input_dict.items():
                     inputs[k] = v[i]
             
@@ -461,29 +448,33 @@ class RegistrationTrainer(TrainerInit):
                 rotations_ab_pred.append(rotation_ab_pred.unsqueeze(dim=0))
                 translations_ab_pred.append(translation_ab_pred.unsqueeze(dim=0).detach().cpu().numpy())
                 eulers_ab.append(euler_ab.unsqueeze(dim=0).numpy())
+
                 ################################
                 # update to stats_meter
                 if (phase == 'train'):
                     loss = stats['loss']
+
                 recall = stats['recall']
                 rte = stats['rte']
                 rre = stats['rre']
 
                 if (phase == 'train'):
                     total_loss += loss
+
                 total_recall += recall
                 total_rte += rte
                 total_rre += rre
 
             if (phase == 'train'):
-                total_loss /= self.batch_size
+                total_loss /= batch_size
             
-            total_recall /= self.batch_size
-            total_rte /= self.batch_size
-            total_rre /= self.batch_size
+            total_recall /= batch_size
+            total_rte /= batch_size
+            total_rre /= batch_size
 
             if (phase == 'train'):
                 stats['loss'] = total_loss
+
             stats['recall'] = total_recall
             stats['rte'] = total_rte
             stats['rre'] = total_rre

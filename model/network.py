@@ -2,23 +2,21 @@ import torch
 
 import gc
 import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-
-import torch.nn as nn
-import torch.nn.functional as F
-
 import MinkowskiEngine as ME
-
+import pandas as pd
+import matplotlib.pyplot as plt
 from torch_batch_svd import svd as fast_svd
 
 from model.resunet import ResUNetBN2C
 from model.simpleunet import SimpleNet
 
 from tools.radius import feature_matching
-from tools.transform_estimation import sparse_gaussian, axis_angle_to_rotation, rotation_to_axis_angle
+from tools.geometry import sparse_gaussian, axis_angle_to_rotation, rotation_to_axis_angle
+
 from lib.timer import random_quad, random_triplet
+
 from model.feature import FCGF, FPFH ,Predator
+
 from tools.utils import  square_distance
 
 
@@ -33,7 +31,7 @@ class PoseEstimator(ME.MinkowskiNetwork):
         self.r_binsize = config.r_binsize
         self.t_binsize = config.t_binsize
         self.smoothing = True
-        self.kernel_size = 5
+        self.kernel_size = config.conv1_kernel_size
 
         self.feature_extraction = FCGF(self.config)
         #self.feature_extraction = FPFH(self.voxel_size)
@@ -64,7 +62,6 @@ class PoseEstimator(ME.MinkowskiNetwork):
         cross_inv = cross_inv[index.squeeze(dim=-1)]
         cross_inv_sum = cross_inv.sum(dtype=torch.int64)
         cross_inv_div = cross_inv / cross_inv_sum
-        test = cross_inv_div.sum()
 
         if (cross_inv_div.all()==0):
             choice = np.random.permutation(pairs.size(0))[:int(round(N/2))]
@@ -72,7 +69,7 @@ class PoseEstimator(ME.MinkowskiNetwork):
             masked_pairs = pairs
         else : 
             _, index = torch.topk(cross_inv_div, k=int(round(N/2)), dim=0, sorted=False)
-        #masked_cross_dist = (cross_dist_inv > 0.0001).nonzero(as_tuple=False)
+            #masked_cross_dist = (cross_dist_inv > 0.0001).nonzero(as_tuple=False)
             masked_pairs = pairs[index.squeeze(dim=-1)]
             
         ################################
@@ -110,8 +107,8 @@ class PoseEstimator(ME.MinkowskiNetwork):
             torch.abs(li - lj) < 3 * self.voxel_size, dim=1
         ).cpu()
         dup_check = torch.logical_and(
-            torch.all(li > self.voxel_size * 1.5, dim=1),
-            torch.all(lj > self.voxel_size * 1.5, dim=1),
+            torch.all(li > self.voxel_size * 2, dim=1),
+            torch.all(lj > self.voxel_size * 2, dim=1),
         ).cpu()
 
         triplets = triplets[torch.logical_and(triangle_check, dup_check)]
@@ -164,7 +161,10 @@ class PoseEstimator(ME.MinkowskiNetwork):
         dist = -2 * torch.matmul(feat0_mean, feat1_mean.T)     
         dist += torch.sum(feat0_mean ** 2, -1).view(N, 1)
         dist += torch.sum(feat1_mean ** 2, -1).view(1, M)
-
+        
+        """ plt.imshow(dist.detach().cpu().numpy(), cmap='hot', interpolation='nearest')
+        plt.show() """
+   
         diag_ind = range(feat1_mean.shape[0])
         dist[diag_ind,diag_ind] = np.inf
         final_dist = dist.min(dim=1).values
@@ -182,7 +182,9 @@ class PoseEstimator(ME.MinkowskiNetwork):
             ],
             dim=1,
         )
+        
         #feat = torch.ones(coord.shape[0]).unsqueeze(1).to(r_coord.device)
+
         feat = dist.unsqueeze(1)
         vote = ME.SparseTensor(
             feat.float(),
@@ -229,18 +231,19 @@ class PoseEstimator(ME.MinkowskiNetwork):
         votes = self.vote(angles, ts, dist)
 
         # gaussian smoothing
-        if self.smoothing:
+        """ if self.smoothing:
             votes = sparse_gaussian(
                 votes, kernel_size=self.kernel_size, dimension=6
             )
-
+        """
         # post processing
-        #if self.refine_model is not None:
-        #    votes = self.refine_model(votes)
-
+        """
         if refine_model is not None:
-            votes = refine_model(votes)
-        
+            votes = refine_model(votes)      
+        """
+
+        votes = refine_model(votes)  
+
         rotation, translate = self.evaluate(votes)
         self.hspace = votes
         Transform = torch.eye(4)
@@ -251,5 +254,5 @@ class PoseEstimator(ME.MinkowskiNetwork):
         gc.collect()
         torch.cuda.empty_cache()
         
-        return Transform, votes, confidence
+        return Transform, votes
 

@@ -4,8 +4,6 @@ import numpy as np
 
 from tools.pointcloud import ground_truth_attention
 
-
-
 def datasets_setting(pcd0, pcd1, T_gt, voxel_size, search_voxel_size, device):
 
     feats0 = []
@@ -46,6 +44,5 @@ def datasets_setting(pcd0, pcd1, T_gt, voxel_size, search_voxel_size, device):
     sinput1 = ME.SparseTensor(feats1, coordinates=coords1, device=device)
 
     src_over, tgt_over, over_index0, over_index1 = ground_truth_attention(pcd0[inds0], pcd1[inds1], T_gt, search_voxel_size)
-
 
     return sinput0, sinput1, src_over, tgt_over, over_index0, over_index1

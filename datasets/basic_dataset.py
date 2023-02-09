@@ -1,8 +1,7 @@
-import torch
+
 from torch.utils.data import Dataset
 import numpy as np
 import logging
-from sklearn.neighbors import NearestNeighbors
 
 class BasicDataset(Dataset):
     AUGMENT = None
@@ -17,19 +16,16 @@ class BasicDataset(Dataset):
         self.phase = phase
         self.files = []
         self.data_objects = []
-        self.transform = transform
+        
         self.voxel_size = config.voxel_size
-        self.matching_search_voxel_size = \
-            config.voxel_size * config.positive_pair_search_voxel_size_multiplier
-
         self.random_scale = random_scale
         self.min_scale = config.min_scale
         self.max_scale = config.max_scale
-        self.num_points = config.num_points
 
         self.random_rotation = random_rotation
         self.rotation_range = config.rotation_range
         self.randg = np.random.RandomState()
+        
         if manual_seed:
             self.reset_seed()
 

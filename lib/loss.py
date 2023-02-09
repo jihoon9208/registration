@@ -1,18 +1,4 @@
-"""
-Loss functions
-Author: Shengyu Huang
-Last modified: 30.11.2020
-"""
-from inspect import trace
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
-import numpy as np
-from tools.utils import square_distance
-from sklearn.metrics import precision_recall_fscore_support
-from tools.transforms import apply_transform
-
 
 def transformation_loss( gt_R, gt_t, pred_R, pred_t):
     '''

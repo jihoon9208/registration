@@ -17,7 +17,7 @@ from tools.utils import to_o3d_pcd, to_tensor
 
 from tools.file import read_trajectory
 from datasets.basic_dataset import BasicDataset
-from tools.pointcloud import draw_registration_result, get_matching_indices, overlap_get_matching_indices ,make_open3d_point_cloud, ground_truth_attention, compute_overlap
+from tools.pointcloud import draw_registration_result, get_matching_indices, overlap_get_matching_indices ,make_open3d_point_cloud, ground_truth_attention
 from tools.transforms import apply_transform, decompose_rotation_translation
 
 import MinkowskiEngine as ME
@@ -171,7 +171,7 @@ class ThreeDMatchPairDataset(BasicDataset):
         scale = 1
 
         return (src_xyz, tgt_xyz, src_coords, tgt_coords, feats0, feats1 ,\
-            src_over, tgt_over, src_over_coords, tgt_over_coords, src_over_feats, tgt_over_feats, \
+            src_over, tgt_over, \
             over_index0, over_index1, matching_inds, over_matching_inds, T_gt, euler, scale)
 
 class ThreeDMatchTestDataset(Dataset):

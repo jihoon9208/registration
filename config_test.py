@@ -12,13 +12,12 @@ def str2bool(v):
   return v.lower() in ('true', '1')
 
 logging_arg = add_argument_group('Logging')
-
 logging_arg.add_argument('--snapshot_dir', type=str, default='outputs/snapshot')
 
 trainer_arg = add_argument_group('Trainer')
-
 trainer_arg.add_argument('--test_phase', type=str, default="test")
 trainer_arg.add_argument('--val_batch_size', type=int, default=1)
+
 # dNetwork specific configurations
 dgf_arg = add_argument_group('Network')
 dgf_arg.add_argument('--sparse_dims', type=int, default=32, help='Feature dimension')
@@ -36,7 +35,6 @@ dgf_arg.add_argument('--eps', type=float, default=1e-12)
 dgf_arg.add_argument('--dist_type', type=str, default='L2')
 dgf_arg.add_argument('--best_val_metric1', type=str, default='loss')
 dgf_arg.add_argument('--best_val_metric2', type=str, default='recall')
-dgf_arg.add_argument('--k_nn_geof', default=32, type=int, help='number of neighbors to describe the local geometry')
 
 dgf_arg.add_argument('--num_trial', default=100000, type=int)
 dgf_arg.add_argument('--r_binsize', default=0.02, type=float)
@@ -94,7 +92,7 @@ misc_arg.add_argument(
     help='The maximum number of features to find nearest neighbors in batch')
 
 data_arg = add_argument_group('Data')
-data_arg.add_argument('--dataset', type=str, default='ThreeDLoMatchTestDataset')
+data_arg.add_argument('--dataset', type=str, default='ThreeDMatchTestDataset')
 data_arg.add_argument('--descriptor', type=str, default='predator')
 data_arg.add_argument("--run_name",default="test", type=str, required=False, help="experiment title")
 

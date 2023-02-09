@@ -16,25 +16,12 @@ from .basic_dataset import BasicDataset
 
 from tools.utils import to_o3d_pcd, to_tensor
 from tools.pointcloud import get_matching_indices, overlap_get_matching_indices ,make_open3d_point_cloud
-from tools.transforms import apply_transform, decompose_rotation_translation
+from tools.transforms import apply_transform, decompose_rotation_translation, sample_random_trans, M
 
 import MinkowskiEngine as ME
 
 kitti_cache = {}
 kitti_icp_cache = {}
-
-# Rotation matrix along axis with angle theta
-def M(axis, theta):
-    return expm(np.cross(np.eye(3), axis / norm(axis) * theta))
-
-
-def sample_random_trans(pcd, randg, rotation_range=360):
-    T = np.eye(4)
-    R = M(randg.rand(3) - 0.5, rotation_range * np.pi / 180.0 * (randg.rand(1) - 0.5))
-    T[:3, :3] = R
-    T[:3, 3] = R.dot(-np.mean(pcd, axis=0))
-    return T
-
 
 class KITTIPairDataset(BasicDataset):
     AUGMENT = None
@@ -296,7 +283,7 @@ class KITTIPairDataset(BasicDataset):
 
         # OverRegion
 
-        over_matching_inds = overlap_get_matching_indices(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), trans, matching_search_voxel_size)
+        over_matching_inds = overlap_get_matching_indices(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), trans)
         # overlap
         src_over_coords, tgt_over_coords = np.floor(src_over / self.voxel_size), np.floor(tgt_over / self.voxel_size) 
 
@@ -311,7 +298,7 @@ class KITTIPairDataset(BasicDataset):
         scale = 1
 
         return (unique_xyz0_th.float(), unique_xyz1_th.float(), coords0.int(), coords1.int(), feats0.float(), feats1.float(), \
-                src_over, tgt_over, src_over_coords, tgt_over_coords, src_over_feats, tgt_over_feats, \
+                src_over, tgt_over,  \
                 over_index0, over_index1, matches, over_matching_inds, trans, euler, scale)
 
 

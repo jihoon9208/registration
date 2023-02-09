@@ -1,19 +1,15 @@
 
 import numpy as np
-from sklearn.neighbors import NearestNeighbors
-
 import faiss
 import faiss.contrib.torch_utils
-import numpy as np
-import numpy.matlib as npm
 import torch
+
 from faiss.contrib.torch_utils import (
     swig_ptr_from_FloatTensor,
     swig_ptr_from_IndicesTensor,
 )
 
 res = faiss.StandardGpuResources()
-
 
 def _hash(arr, M=None):
     if isinstance(arr, np.ndarray):
@@ -65,7 +61,6 @@ def search_index_pytorch(index, x, k, D=None, I=None):
     torch.cuda.synchronize()
     return D, I
 
-
 def find_knn_gpu(query, ref, knn=1, nn_max_n=None, return_distance=False):
     assert (
         ref.shape[-1] == query.shape[-1]
@@ -82,51 +77,6 @@ def find_knn_gpu(query, ref, knn=1, nn_max_n=None, return_distance=False):
         return dist, indx
     else:
         return indx
-
-
-def find_radius_gpu(F0, F1, len_batch, radius=None, return_row_splits=False):
-    """
-    !! This function requires custom open3d !!
-    """
-    try:
-        import open3d.ml.torch as ml
-
-        assert (
-            F0.shape[1] == F1.shape[1] == 3
-        ), "find_radius_gpu function only support 3D data."
-
-        len_batch = torch.Tensor(len_batch).long()
-        cum_len_batch = len_batch.cumsum(0)
-        queries_row_splits = torch.zeros(cum_len_batch.shape[0] + 1).long()
-        queries_row_splits[1:] = cum_len_batch[:, 0]
-        points_row_splits = torch.zeros(cum_len_batch.shape[0] + 1).long()
-        points_row_splits[1:] = cum_len_batch[:, 1]
-
-        table = ml.ops.build_spatial_hash_table(
-            F1,
-            radius,
-            points_row_splits=points_row_splits,
-            hash_table_size_factor=1 / 32,
-        )
-
-        neighbor_index, neighbor_row_splits, _ = ml.ops.fixed_radius_search(
-            F1,
-            F0,
-            radius,
-            points_row_splits=points_row_splits,
-            queries_row_splits=queries_row_splits,
-            ignore_query_point=True,
-            **table._asdict(),
-        )
-        if return_row_splits:
-            return neighbor_index.cpu(), neighbor_row_splits.cpu()
-        else:
-            return neighbor_index.cpu()
-
-    except ImportError:
-        print(
-            "unable to import open3d.ml.torch. Please compile open3d with torch ml module enabled."
-        )
 
 
 def feature_matching(F0, F1, knn=1, mutual=True):

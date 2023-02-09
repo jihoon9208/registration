@@ -47,7 +47,7 @@ make
 
 ----------------------------------------------------------------------------
 
-conda install pytorch=1.9.1 torchvision cudatoolkit=11.1 -c pytorch -c nvidia
+conda install pytorch==1.10.0 torchvision==0.11.0 torchaudio==0.10.0 cudatoolkit=11.3 -c pytorch -c conda-forge
 conda install numpy
 conda install openblas-devel -c anaconda
 
@@ -60,7 +60,9 @@ conda install -c fvcore -c iopath -c conda-forge fvcore iopath
 conda install -c bottler nvidiacub
 conda install jupyter
 conda install pytorch3d -c pytorch3d -> torch version 1.10.1
-pip install numpy scipy matplotlib open3d tensorboardX future-fstrings easydict joblib learn gin-config
+pip install "git+https://github.com/facebookresearch/pytorch3d.git"
+
+pip install scipy matplotlib open3d tensorboardX future-fstrings easydict joblib learn 
 
 pip install python-igraph 
 
