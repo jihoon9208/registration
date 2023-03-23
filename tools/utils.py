@@ -1,4 +1,5 @@
 import torch
+import os
 import pickle
 import numpy as np
 import open3d as o3d
@@ -6,6 +7,7 @@ import open3d as o3d
 def square_distance(src, dst):
     """
     Calculate Euclid distance between each two points.
+
     Input:
         src: source points, [B, N, C]
         dst: target points, [B, M, C]
@@ -16,13 +18,14 @@ def square_distance(src, dst):
     B, N, _ = src.shape
     _, M, _ = dst.shape
     
-    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    dist += torch.sum(src ** 2, -1).view(B, N, 1)
-    dist += torch.sum(dst ** 2, -1).view(B, 1, M)
+    dist = -2 * torch.bmm(src, dst.permute(0, 2, 1))
+    dist += torch.sum(src ** 2, -1)[:, :, None]
+    dist += torch.sum(dst ** 2, -1)[:, None, :]
+        
     dist = torch.clamp(dist, min=1e-12, max=None)
     return dist
 
-def square_distance_loss(src, dst):
+def square_distance_tmp(src, dst):
     """
     Calculate Euclid distance between each two points.
 
@@ -36,45 +39,31 @@ def square_distance_loss(src, dst):
     B, N, _ = src.shape
     _, M, _ = dst.shape
     
-    dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
+    dist = -2 * torch.bmm(src.type(torch.float), dst.type(torch.float).permute(0, 2, 1))
+    """ dist = torch.randn(B, N, M).cuda()
+    torch.baddbmm(dist, src, dst.permute(0, 2, 1))
+    dist = -2 * dist """
     dist += torch.sum(src ** 2, -1)[:, :, None]
     dist += torch.sum(dst ** 2, -1)[:, None, :]
+        
     dist = torch.clamp(dist, min=1e-12, max=None)
     return dist
 
-def index_points(points, idx):
-    """
-    Input:
-        points: input points data, [B, N, C]
-        idx: sample index data, [B, S]
-    Return:
-        new_points:, indexed points data, [B, S, C]
-    """
+def rte_rre(T_pred, T_gt, rte_thresh, rre_thresh, eps=1e-16):
+    if T_pred is None:
+        return np.array([0, np.inf, np.inf])
 
-    device = points.device
-    B = points.shape[0]
-    view_shape = list(idx.shape)
-    view_shape[1:] = [1] * (len(view_shape) - 1)
-    repeat_shape = list(idx.shape)
-    repeat_shape[0] = 1
-    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
-    new_points = points[batch_indices, idx, :]
-
-    del batch_indices, repeat_shape, view_shape
-
-    return new_points
-
-def validate_gradient(model):
-    """
-    Confirm all the gradients are non-nan and non-inf
-    """
-    for name, param in model.named_parameters():
-        if param.grad is not None:
-            if torch.any(torch.isnan(param.grad)):
-                return False
-            if torch.any(torch.isinf(param.grad)):
-                return False
-    return True
+    rte = np.linalg.norm(T_pred[:3, 3] - T_gt[:3, 3]) * 100
+    rre = (
+        np.arccos(
+            np.clip(
+                (np.trace(T_pred[:3, :3].T @ T_gt[:3, :3]) - 1) / 2, -1 + eps, 1 - eps
+            )
+        )
+        * 180
+        / np.pi
+    )
+    return np.array([rte < rte_thresh and rre < rre_thresh, rte, rre])
 
 def load_obj(path):
     """
@@ -90,13 +79,6 @@ def save_obj(obj, path ):
     with open(path, 'wb') as f:
         pickle.dump(obj, f)
 
-def to_tsfm(rot,trans):
-    
-    tsfm = np.eye(4)
-    tsfm[:3,:3] = rot
-    tsfm[:3,3] = trans.flatten()
-    return tsfm
-
 def to_tensor(x):
     """
     Conver array to tensor 
@@ -107,6 +89,7 @@ def to_tensor(x):
         return torch.from_numpy(x)
     else:
         raise ValueError(f'Can not convert to torch tensor, {x}')
+
 def to_array(tensor):
     """
     Conver tensor to array
@@ -125,18 +108,18 @@ def to_o3d_pcd(xyz):
     pcd.points = o3d.utility.Vector3dVector(to_array(xyz))
     return pcd
 
-def get_correspondences(src_pcd, tgt_pcd, trans, search_voxel_size, K=None):
-    src_pcd.transform(trans)
-    pcd_tree = o3d.geometry.KDTreeFlann(tgt_pcd)
+class Logger:
+    def __init__(self, path):
+        self.path = path
 
-    correspondences = []
-    for i, point in enumerate(src_pcd.points):
-        [count, idx, _] = pcd_tree.search_radius_vector_3d(point, search_voxel_size)
-        if K is not None:
-            idx = idx[:K]
-        for j in idx:
-            correspondences.append([i, j])
-    
-    correspondences = np.array(correspondences)
-    correspondences = torch.from_numpy(correspondences)
-    return correspondences
+        os.makedirs(self.path, exist_ok=True)
+
+        self.fw = open(self.path+'/log.txt','a')
+
+    def write(self, text):
+        self.fw.write(text)
+        self.fw.flush()
+
+    def close(self):
+        self.fw.close()
+

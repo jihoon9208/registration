@@ -3,7 +3,6 @@
 
 import torch
 import numpy as np
-import MinkowskiEngine as ME
 
 from tools.utils import to_tensor 
 
@@ -16,54 +15,67 @@ class CollateFunc:
         return self.collation_fn(list_data)
 
     def collate_pair_fn(list_data):
-        xyz0, xyz1, coords0, coords1, feats0, feats1, xyz0_over, xyz1_over, over_index0, over_index1, matching_inds, rot, trans, euler, scale = list(
-            zip(*list_data))
+        xyz0, xyz1, coords0, coords1, feats0, feats1, xyz0_over, xyz1_over, \
+        over_index0, over_index1, matching_inds, over_matching_inds, \
+        trans, euler, scale = list(zip(*list_data))
 
-        # prepare inputs for FCGF
-        src_batch_C, src_batch_F = ME.utils.sparse_collate(coords0, feats0)
-        tgt_batch_C, tgt_batch_F = ME.utils.sparse_collate(coords1, feats1)
-
-        # concatenate xyz
-        src_xyz = torch.cat(xyz0, 0).float()
-        tgt_xyz = torch.cat(xyz1, 0).float()
-
-        src_over_xyz = torch.cat(xyz0_over, 0).float()
-        tgt_over_xyz = torch.cat(xyz1_over, 0).float()
-
-        over_index0 = torch.cat(over_index0, 0).int()
-        over_index1 = torch.cat(over_index1, 0).int()
+        src_batch0, tgt_batch1 = [], []
+        src_over_xyz, tgt_over_xyz = [], [] 
+        src_over_index, tgt_over_index = [], []
 
         # add batch indice to matching_inds
-        matching_inds_batch = []
+        matching_inds_batch, over_matching_inds_batch = [], []
+        match_inds_batch, match_num_batch = [], []
         len_batch = []
-        curr_start_ind = torch.zeros((1,2))
+
+        curr_start_inds = np.zeros((1, 2))
 
         for batch_id, _ in enumerate(matching_inds):
             N0 = coords0[batch_id].shape[0]
             N1 = coords1[batch_id].shape[0]
-            matching_inds_batch.append(matching_inds[batch_id]+curr_start_ind)
+            
+            #######################
+            # full
+            src_batch0.append(to_tensor(xyz0[batch_id]))
+            tgt_batch1.append(to_tensor(xyz1[batch_id]))
+
+            #######################
+            # overlap
+            src_over_xyz.append(to_tensor(xyz0_over[batch_id]))
+            tgt_over_xyz.append(to_tensor(xyz1_over[batch_id]))
+
+            src_over_index.append(over_index0[batch_id].long())
+            tgt_over_index.append(over_index1[batch_id].long())
+
+            # correspondence 
+            matching_inds_batch.append(torch.from_numpy(np.array(matching_inds[batch_id]) + curr_start_inds))
+            over_matching_inds_batch.append(torch.from_numpy(np.array(over_matching_inds[batch_id])))
+
+            # correspondence of each batch 
+            match_inds_batch.append(torch.from_numpy(np.array(matching_inds[batch_id])))
+            match_num_batch.append(len(matching_inds[batch_id]))
+
             len_batch.append([N0,N1])
 
-            curr_start_ind[0,0]+=N0
-            curr_start_ind[0,1]+=N1   
-
-        matching_inds_batch = torch.cat(matching_inds_batch, 0).int()
+            curr_start_inds[0,0]+=N0
+            curr_start_inds[0,1]+=N1   
 
         return {
-            'pcd0': src_xyz,
-            'pcd1': tgt_xyz,
+            'pcd0': src_batch0,
+            'pcd1': tgt_batch1,
             'pcd0_over' : src_over_xyz,
             'pcd1_over' : tgt_over_xyz,
             'over_index0' : over_index0,
             'over_index1' : over_index1,
-            'sinput0_C': src_batch_C,
-            'sinput0_F': src_batch_F.float(),
-            'sinput1_C': tgt_batch_C,
-            'sinput1_F': tgt_batch_F.float(),
+            'sinput0_C': coords0,
+            'sinput0_F': feats0,
+            'sinput1_C': coords1,
+            'sinput1_F': feats1,    
             'correspondences': matching_inds_batch,
-            'rot': rot[0],
-            'trans': trans[0],
-            'scale': scale[0],
-            'Euler_gt': euler[0],
-            'len_batch': len_batch
+            'T_gt': trans,
+            'scale': scale,
+            'Euler_gt': euler,
+            'len_batch': len_batch,
+            'pos_pair': match_inds_batch,
+            'pos_len': match_num_batch,
         }

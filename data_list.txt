@@ -1,0 +1,78 @@
+filename0 : 7-scenes-redkitchen/cloud_bin_9.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_34.ply
+recall : 1.0 RTE : 0.32 RRE :0.8
+filename0 : 7-scenes-redkitchen/cloud_bin_21.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_59.ply
+recall : 1.0 RTE : 1.08 RRE :0.33
+filename0 : 7-scenes-redkitchen/cloud_bin_20.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_23.ply
+recall : 1.0 RTE : 0.86 RRE :0.67
+filename0 : 7-scenes-redkitchen/cloud_bin_3.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_43.ply
+recall : 1.0 RTE : 1.32 RRE :0.94
+filename0 : 7-scenes-redkitchen/cloud_bin_4.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_10.ply
+recall : 1.0 RTE : 1.24 RRE :0.85
+filename0 : 7-scenes-redkitchen/cloud_bin_4.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_11.ply
+recall : 1.0 RTE : 0.48 RRE :0.0
+filename0 : 7-scenes-redkitchen/cloud_bin_6.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_9.ply
+recall : 1.0 RTE : 0.99 RRE :0.45
+filename0 : 7-scenes-redkitchen/cloud_bin_10.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_11.ply
+recall : 1.0 RTE : 1.44 RRE :0.57
+filename0 : 7-scenes-redkitchen/cloud_bin_18.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_19.ply
+recall : 1.0 RTE : 1.34 RRE :0.82
+filename0 : 7-scenes-redkitchen/cloud_bin_36.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_37.ply
+recall : 1.0 RTE : 1.37 RRE :0.87
+filename0 : 7-scenes-redkitchen/cloud_bin_38.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_39.ply
+recall : 1.0 RTE : 1.47 RRE :0.71
+filename0 : 7-scenes-redkitchen/cloud_bin_42.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_43.ply
+recall : 1.0 RTE : 0.75 RRE :0.81
+filename0 : 7-scenes-redkitchen/cloud_bin_44.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_45.ply
+recall : 1.0 RTE : 1.13 RRE :0.56
+filename0 : 7-scenes-redkitchen/cloud_bin_48.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_49.ply
+recall : 1.0 RTE : 1.47 RRE :0.72
+filename0 : 7-scenes-redkitchen/cloud_bin_54.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_55.ply
+recall : 1.0 RTE : 1.1 RRE :0.3
+filename0 : 7-scenes-redkitchen/cloud_bin_56.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_57.ply
+recall : 1.0 RTE : 1.22 RRE :0.41
+filename0 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_4.ply
+filename1 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_6.ply
+recall : 1.0 RTE : 0.66 RRE :0.26
+filename0 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_13.ply
+filename1 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_14.ply
+recall : 1.0 RTE : 1.25 RRE :0.51
+filename0 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_14.ply
+filename1 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_17.ply
+recall : 1.0 RTE : 0.83 RRE :0.0
+filename0 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_15.ply
+filename1 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_17.ply
+recall : 1.0 RTE : 1.17 RRE :0.54
+filename0 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_44.ply
+filename1 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_45.ply
+recall : 1.0 RTE : 1.31 RRE :0.59
+filename0 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_15.ply
+filename1 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_16.ply
+recall : 1.0 RTE : 0.69 RRE :0.17
+filename0 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_18.ply
+filename1 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_19.ply
+recall : 1.0 RTE : 1.29 RRE :0.81
+filename0 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_39.ply
+filename1 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_40.ply
+recall : 1.0 RTE : 1.18 RRE :0.34
+filename0 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_41.ply
+filename1 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_47.ply
+recall : 1.0 RTE : 1.26 RRE :0.81
+filename0 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_55.ply
+filename1 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_56.ply
+recall : 1.0 RTE : 0.75 RRE :0.59

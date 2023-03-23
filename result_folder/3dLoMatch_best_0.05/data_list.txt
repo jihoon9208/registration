@@ -1,0 +1,12 @@
+filename0 : 7-scenes-redkitchen/cloud_bin_23.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_39.ply
+recall : 1.0 RTE : 0.83 RRE :0.51
+filename0 : 7-scenes-redkitchen/cloud_bin_1.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_38.ply
+recall : 1.0 RTE : 1.09 RRE :0.01
+filename0 : 7-scenes-redkitchen/cloud_bin_9.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_48.ply
+recall : 1.0 RTE : 0.56 RRE :1.36
+filename0 : 7-scenes-redkitchen/cloud_bin_40.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_44.ply
+recall : 1.0 RTE : 1.71 RRE :0.71

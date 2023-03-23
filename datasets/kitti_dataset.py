@@ -8,27 +8,20 @@ import glob
 import os
 from scipy.linalg import expm, norm
 import pathlib
+from pytorch3d.transforms.rotation_conversions import matrix_to_euler_angles
+
 
 from tools.pointcloud import get_matching_indices, make_open3d_point_cloud
 from .basic_dataset import BasicDataset
+
+from tools.utils import to_o3d_pcd, to_tensor
+from tools.pointcloud import get_matching_indices, overlap_get_matching_indices ,make_open3d_point_cloud
+from tools.transforms import apply_transform, decompose_rotation_translation, sample_random_trans, M
 
 import MinkowskiEngine as ME
 
 kitti_cache = {}
 kitti_icp_cache = {}
-
-# Rotation matrix along axis with angle theta
-def M(axis, theta):
-    return expm(np.cross(np.eye(3), axis / norm(axis) * theta))
-
-
-def sample_random_trans(pcd, randg, rotation_range=360):
-    T = np.eye(4)
-    R = M(randg.rand(3) - 0.5, rotation_range * np.pi / 180.0 * (randg.rand(1) - 0.5))
-    T[:3, :3] = R
-    T[:3, 3] = R.dot(-np.mean(pcd, axis=0))
-    return T
-
 
 class KITTIPairDataset(BasicDataset):
     AUGMENT = None
@@ -241,12 +234,19 @@ class KITTIPairDataset(BasicDataset):
             xyz0 = scale * xyz0
             xyz1 = scale * xyz1
 
+        R, T = decompose_rotation_translation(trans)
+
+        euler = matrix_to_euler_angles(torch.from_numpy(R), "ZYX")
+
         # Voxelization
         xyz0_th = torch.from_numpy(xyz0)
         xyz1_th = torch.from_numpy(xyz1)
 
         _, sel0 = ME.utils.sparse_quantize(xyz0_th / self.voxel_size, return_index=True)
         _, sel1 = ME.utils.sparse_quantize(xyz1_th / self.voxel_size, return_index=True)
+
+        src_xyz = xyz0_th[sel0]
+        tgt_xyz = xyz1_th[sel1]
 
         # Make point clouds using voxelized points
         pcd0 = make_open3d_point_cloud(xyz0[sel0])
@@ -256,6 +256,8 @@ class KITTIPairDataset(BasicDataset):
         matches = get_matching_indices(pcd0, pcd1, trans, matching_search_voxel_size)
         if len(matches) < 1000:
             raise ValueError(f"{drive}, {t0}, {t1}")
+
+        src_over, tgt_over, over_index0, over_index1 = self.ground_truth_attention(src_xyz, tgt_xyz, trans)
 
         # Get features
         npts0 = len(sel0)
@@ -279,8 +281,25 @@ class KITTIPairDataset(BasicDataset):
             coords0, feats0 = self.transform(coords0, feats0)
             coords1, feats1 = self.transform(coords1, feats1)
 
-        return (unique_xyz0_th.float(), unique_xyz1_th.float(), coords0.int(),
-                coords1.int(), feats0.float(), feats1.float(), matches, trans)
+        # OverRegion
+
+        over_matching_inds = overlap_get_matching_indices(to_o3d_pcd(src_over), to_o3d_pcd(tgt_over), trans)
+        # overlap
+        src_over_coords, tgt_over_coords = np.floor(src_over / self.voxel_size), np.floor(tgt_over / self.voxel_size) 
+
+        # get over feats
+        src_over_feats = np.ones((src_over_coords.shape[0],1),dtype=np.float32)
+        tgt_over_feats = np.ones((tgt_over_coords.shape[0],1),dtype=np.float32)
+
+        #src_xyz, tgt_xyz = to_tensor(src_xyz).float(), to_tensor(tgt_xyz).float()
+        src_over, tgt_over = to_tensor(src_over).float(), to_tensor(tgt_over).float()
+        over_index0, over_index1 = to_tensor(over_index0).int(), to_tensor(over_index1).int()
+
+        scale = 1
+
+        return (unique_xyz0_th.float(), unique_xyz1_th.float(), coords0.int(), coords1.int(), feats0.float(), feats1.float(), \
+                src_over, tgt_over,  \
+                over_index0, over_index1, matches, over_matching_inds, trans, euler, scale)
 
 
 class KITTINMPairDataset(KITTIPairDataset):

@@ -1,0 +1,39 @@
+pcd_tree = o3d.geometry.KDTreeFlann(downpcd)
+
+            [_, idx0, _] = pcd_tree.search_radius_vector_3d(pcd.points[100000], 1)
+
+            if not os.path.exists(root + i.split('.')[0]):
+                    os.mkdir(root + i.split('.')[0] )
+            file0 = open(root + i.split('.')[0] + "/" + 'point_cloud0' + "{}".format(file_count) +'.txt' , "w") 
+            
+            for t in idx0:
+                point_list.append(np.array(pcd.points[t], dtype=np.float32))
+
+            for d in point_list:
+                file0.write(str(d[0])+','+str(d[1])+','+str(d[2]))
+                file0.write('\n')
+            file0.close()
+
+            [_, idx1, _] = pcd_tree.search_radius_vector_3d(pcd.points[150000], 1)
+            if not os.path.exists(root + i.split('.')[0]):
+                    os.mkdir(root + i.split('.')[0] )
+            file1 = open(root + i.split('.')[0] + "/" + 'point_cloud1' + "{}".format(file_count) +'.txt' , "w") 
+            
+            for t in idx1:
+                point_list.append(np.array(pcd.points[t], dtype=np.float32))
+
+            for d in point_list:
+                file1.write(str(d[0])+','+str(d[1])+','+str(d[2]))
+                file1.write('\n')
+            file1.close()
+
+
+for FOLD in 1 2 3 4 5 6; do 
+    CUDA_VISIBLE_DEVICES=0 python ./learning/main.py --dataset vkitti --VKITTI_PATH ./vkitti3d --cvfold $FOLD --epochs 100 \
+    --lr_steps "[40, 50, 60, 70, 80]" --test_nth_epoch 10 --model_config gru_10_1_1_1_0,f_13 --pc_attribs xyzXYZrgb \
+    --ptn_nfeat_stn 9 --batch_size 4 --ptn_minpts 15 --spg_augm_order 3 --spg_augm_hardcutoff 256 \
+    --ptn_widths "[[64,64,128], [64,32,32]]" --ptn_widths_stn "[[32,64], [32,16]]" --loss_weights sqrt \
+    --use_val_set 1 --odir results/vkitti/pretrained/cv$FOLD --resume RESUME; \
+done;
+
+python partition/visualize.py --dataset vkitti --ROOT_PATH ./vkitti3d --res_file 'results/vkitti/pretrained/cv1/predictions_test' --file_path '01/0001_00000' --output_type ifprs
