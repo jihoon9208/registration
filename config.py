@@ -52,7 +52,7 @@ trainer_arg.add_argument(
 
 network_arg = add_argument_group('Network')
 network_arg.add_argument('--model', type=str, default='ResUNetBN2C')
-network_arg.add_argument('--model_select', type=str, default='sum')
+network_arg.add_argument('--model_select', type=str, default='simple')
 
 network_arg.add_argument('--sparse_dims', type=int, default=32, help='Feature dimension')
 network_arg.add_argument('--conv1_kernel_size', type=int, default=5)
@@ -73,8 +73,8 @@ network_arg.add_argument('--normalize_feature', type=str2bool, default='True')
 network_arg.add_argument('--best_val_metric', type=str, default='recall')
 
 network_arg.add_argument('--num_trial', default=100000, type=int)
-network_arg.add_argument('--r_binsize', default=0.02, type=float)
-network_arg.add_argument('--t_binsize', default=0.02, type=float)
+network_arg.add_argument('--r_binsize', default=0.015, type=float)
+network_arg.add_argument('--t_binsize', default=0.015, type=float)
 
 # Attention specific configurations
 att_arg = add_argument_group('Attention')
@@ -116,12 +116,12 @@ misc_arg.add_argument(
     help='The maximum number of features to find nearest neighbors in batch')
 
 # BackBone Network
-misc_arg.add_argument('--feat_weight', type=str, default='./weights/fcgf_3dmatch_50.pth')
+misc_arg.add_argument('--feat_weight', type=str, default='./weights/fcgf_3dmatch_25.pth')
 
 
 data_arg = add_argument_group('Data')
 data_arg.add_argument('--dataset', type=str, default='ThreeDMatchPairDataset')
-data_arg.add_argument('--voxel_size', type=float, default=0.05)
+data_arg.add_argument('--voxel_size', type=float, default=0.025)
 data_arg.add_argument(
     '--threed_match_dir', type=str, default="../Datasets/3dmatch/threedmatch")
 

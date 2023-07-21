@@ -319,8 +319,7 @@ class RegistrationTrainer(TrainerInit):
                 tgt_batch_F.to(self.device),
                 coordinates=tgt_batch_C.to(self.device))
 
-            Transform_pred, votes = \
-                self.PoseEstimator(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, self.model)
+            Transform_pred, votes = self.PoseEstimator(sinput0, sinput1, over_xyz0, over_xyz1, over_index0, over_index1, self.model)
 
             rotation_ab, translation_ab = decompose_rotation_translation(transform_ab.to(self.device))
             rotation_pred, translation_pred = decompose_rotation_translation(Transform_pred.to(self.device))

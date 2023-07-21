@@ -100,3 +100,54 @@ def draw_point_cloud(source, target, transformation):
     source_temp.transform(transformation)
     o3d.visualization.draw_geometries([source_temp])
     o3d.visualization.draw_geometries([target_temp])
+
+
+def compute_overlap(p1, p2, overlap_radius):
+
+    if isinstance(p1, np.ndarray):
+        src_pcd = to_o3d_pcd(p1)
+        src_xyz = p1
+    else:
+        src_pcd = p1
+        src_xyz = np.asarray(p1)
+
+    if isinstance(p2, np.ndarray):
+        tgt_pcd = to_o3d_pcd(p2)
+        tgt_xyz = p2
+    else:
+        tgt_pcd = p2
+        tgt_xyz = np.asarray(p2)
+
+    # Check which points in tgt has a correspondence (i.e. point nearby) in the src,
+    # and then in the other direction. As long there's a point nearby, it's
+    # considered to be in the overlap region. For correspondences, we require a stronger
+    # condition of being mutual matches
+    tgt_corr = np.full(tgt_xyz.shape[0], -1)
+    pcd_tree = o3d.geometry.KDTreeFlann(src_pcd)
+    for i, t in enumerate(tgt_xyz):
+        num_knn, knn_indices, knn_dist = pcd_tree.search_radius_vector_3d(t, overlap_radius)
+        if num_knn > 0:
+            tgt_corr[i] = knn_indices[0]
+
+    src_corr = np.full(src_xyz.shape[0], -1)    
+    pcd_tree = o3d.geometry.KDTreeFlann(tgt_pcd)
+    for i, s in enumerate(src_xyz):
+        num_knn, knn_indices, knn_dist = pcd_tree.search_radius_vector_3d(s, overlap_radius)
+        if num_knn > 0:
+            src_corr[i] = knn_indices[0]
+
+    # Compute mutual correspondences
+    src_corr_is_mutual = np.logical_and(tgt_corr[src_corr] == np.arange(len(src_corr)),
+                                        src_corr > 0)
+    tgt_corr_is_mutual = np.logical_and(src_corr[tgt_corr] == np.arange(len(tgt_corr)),
+                                        tgt_corr > 0)
+
+    src_tgt_corr = np.stack([np.nonzero(src_corr_is_mutual)[0],
+                             src_corr[src_corr_is_mutual]])
+    tgt_src_corr = np.stack([np.nonzero(tgt_corr_is_mutual)[0],
+                             tgt_corr[tgt_corr_is_mutual]])
+
+    src = torch.from_numpy(src_xyz[src_tgt_corr[1]])
+    tgt = torch.from_numpy(tgt_xyz[tgt_src_corr[1]])
+
+    return src, tgt, src_tgt_corr[1], tgt_src_corr[1]

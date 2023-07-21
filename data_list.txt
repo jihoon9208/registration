@@ -76,3 +76,63 @@ recall : 1.0 RTE : 1.26 RRE :0.81
 filename0 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_55.ply
 filename1 : sun3d-home_md-home_md_scan9_2012_sep_30/cloud_bin_56.ply
 recall : 1.0 RTE : 0.75 RRE :0.59
+filename0 : 7-scenes-redkitchen/cloud_bin_20.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_24.ply
+recall : 1.0 RTE : 1.16 RRE :0.59
+filename0 : 7-scenes-redkitchen/cloud_bin_0.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_9.ply
+recall : 1.0 RTE : 0.64 RRE :0.01
+filename0 : 7-scenes-redkitchen/cloud_bin_2.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_28.ply
+recall : 1.0 RTE : 1.09 RRE :0.01
+filename0 : 7-scenes-redkitchen/cloud_bin_5.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_38.ply
+recall : 1.0 RTE : 1.15 RRE :0.01
+filename0 : 7-scenes-redkitchen/cloud_bin_5.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_39.ply
+recall : 1.0 RTE : 1.25 RRE :0.9
+filename0 : 7-scenes-redkitchen/cloud_bin_8.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_17.ply
+recall : 1.0 RTE : 1.15 RRE :0.6
+filename0 : 7-scenes-redkitchen/cloud_bin_8.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_19.ply
+recall : 1.0 RTE : 1.26 RRE :0.01
+filename0 : 7-scenes-redkitchen/cloud_bin_8.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_59.ply
+recall : 1.0 RTE : 0.83 RRE :0.9
+filename0 : 7-scenes-redkitchen/cloud_bin_15.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_25.ply
+recall : 1.0 RTE : 0.98 RRE :0.97
+filename0 : 7-scenes-redkitchen/cloud_bin_18.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_24.ply
+recall : 1.0 RTE : 1.36 RRE :0.01
+filename0 : 7-scenes-redkitchen/cloud_bin_44.ply
+filename1 : 7-scenes-redkitchen/cloud_bin_45.ply
+recall : 1.0 RTE : 0.88 RRE :0.56
+filename0 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_12.ply
+filename1 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_17.ply
+recall : 1.0 RTE : 0.8 RRE :0.17
+filename0 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_25.ply
+filename1 : sun3d-home_at-home_at_scan1_2013_jan_1/cloud_bin_28.ply
+recall : 1.0 RTE : 1.17 RRE :0.63
+filename0 : sun3d-hotel_umd-maryland_hotel3/cloud_bin_25.ply
+filename1 : sun3d-hotel_umd-maryland_hotel3/cloud_bin_27.ply
+recall : 1.0 RTE : 1.48 RRE :0.28
+filename0 : sun3d-hotel_umd-maryland_hotel3/cloud_bin_32.ply
+filename1 : sun3d-hotel_umd-maryland_hotel3/cloud_bin_33.ply
+recall : 1.0 RTE : 1.38 RRE :0.95
+filename0 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_11.ply
+filename1 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_53.ply
+recall : 1.0 RTE : 1.41 RRE :0.75
+filename0 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_13.ply
+filename1 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_14.ply
+recall : 1.0 RTE : 1.32 RRE :0.66
+filename0 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_55.ply
+filename1 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_56.ply
+recall : 1.0 RTE : 1.32 RRE :0.83
+filename0 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_61.ply
+filename1 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_62.ply
+recall : 1.0 RTE : 1.01 RRE :0.98
+filename0 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_63.ply
+filename1 : sun3d-mit_76_studyroom-76-1studyroom2/cloud_bin_64.ply
+recall : 1.0 RTE : 0.8 RRE :0.9

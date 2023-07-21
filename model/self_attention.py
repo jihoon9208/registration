@@ -2,12 +2,11 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import MinkowskiEngine as ME
 
 from copy import deepcopy
 import torch.utils.checkpoint as checkpoint
 
-from tools.utils import square_distance, square_distance_tmp
+from tools.utils import square_distance_tmp
 
 def get_graph_feature(coords, feats, k=10):
     """
@@ -37,29 +36,33 @@ def get_graph_feature(coords, feats, k=10):
 
     return feats_cat
 
-""" 
+
 class SelfAttention(nn.Module):
     def __init__(self,feature_dim,k=10):
         super(SelfAttention, self).__init__() 
         self.conv1 = nn.Conv2d(feature_dim, feature_dim * 2 , kernel_size=1, bias=False)
         self.in1 = nn.InstanceNorm2d(feature_dim)
         
-        self.conv2 = nn.Conv2d(feature_dim * 2, feature_dim * 4, kernel_size=1,bias=False)
-        self.in2 = nn.InstanceNorm2d(feature_dim * 4)
+        self.conv2 = nn.Conv2d(feature_dim , feature_dim * 2, kernel_size=1,bias=False)
+        self.in2 = nn.InstanceNorm2d(feature_dim)
 
-        self.conv3 = nn.Conv2d(feature_dim * 7, feature_dim, kernel_size=1, bias=False)
+        self.conv3 = nn.Conv2d(feature_dim , feature_dim * 2, kernel_size=1,bias=False)
         self.in3 = nn.InstanceNorm2d(feature_dim)
+
+        self.conv4 = nn.Conv2d(feature_dim * 2, feature_dim, kernel_size=1, bias=False)
+        self.in4 = nn.InstanceNorm2d(feature_dim)
+
 
         self.k = k
 
-    def forward(self, coord, feat):
+    def forward(self, feat):
         
-        Here we take coordinats and features, feature aggregation are guided by coordinates
-        Input: 
-            coords:     [B, 3, N]
-            feats:      [B, C, N]
-        Output:
-            feats:      [B, C, N]
+        # Here we take coordinats and features, feature aggregation are guided by coordinates
+        # Input: 
+        #     coords:     [B, 3, N]
+        #     feats:      [B, C, N]
+        # Output:
+        #     feats:      [B, C, N]
         
 
         B, C, N = feat.size()
@@ -71,38 +74,21 @@ class SelfAttention(nn.Module):
         x1 = x1.max(dim=-1,keepdim=True)[0]
 
         #x2 = get_graph_feature(coord, x1.squeeze(-1), self.k)
-        x2 = F.leaky_relu(self.in2(self.conv2(x1)), negative_slope=0.2)
+        x2 = F.leaky_relu(self.in2(self.conv2(x0)), negative_slope=0.2)
         x2 = x2.max(dim=-1, keepdim=True)[0]
 
-        x3 = torch.cat((x0,x1,x2),dim=1)
-        x3 = F.leaky_relu(self.in3(self.conv3(x3)), negative_slope=0.2).view(B, -1, N)
+        x3 = F.leaky_relu(self.in3(self.conv3(x0)), negative_slope=0.2)
+        x3 = x3.max(dim=-1, keepdim=True)[0]
 
-        x3 = x3.permute(0, 2, 1).squeeze(0)
-        coord = coord.permute(0, 2, 1).squeeze(0)
-        
-        #x3 = x3 + feat
-        return x3
+        query_key = torch.matmul(x1.squeeze(-1).permute(0, 2, 1) , x2.squeeze(-1))
 
-"""
+        x4 = torch.matmul(x3.squeeze(-1), query_key)
 
-class SelfAttention(ME.MinkowskiModule):
-    
-    def __init__(self, in_channels, out_channels):
-        super(SelfAttention, self).__init__()
+        x4 = x1.squeeze(-1) - x4
 
-        self.query = ME.MinkowskiLinear(in_channels, out_channels)
-        self.key = ME.MinkowskiLinear(in_channels, out_channels)
-        self.value = ME.MinkowskiLinear(in_channels, out_channels)
+        x4 = F.leaky_relu(self.in4(self.conv4(x4.unsqueeze(-1))), negative_slope=0.2)
+        x4 = x4.max(dim=-1, keepdim=True)[0]
 
-    def forward(self, x):
+        return x4.squeeze(-1)
 
-        query = self.query(x)
-        key = self.key(x)
-        value = self.value(x)
-
-        attention = torch.matmul(query, key.transpose(-2, -1))
-        attention = torch.softmax(attention, dim=-1)
-        out = torch.matmul(attention, value)
-
-        return out
 

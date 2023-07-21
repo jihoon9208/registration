@@ -13,6 +13,7 @@ from datasets.data_loaders import make_data_loader
 from lib.trainer import RegistrationTrainer
 from model.simpleunet import SimpleNet
 from model.self_attention import SelfAttention
+from model.transformer_refinement import PointTransfRef
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
@@ -27,12 +28,8 @@ def get_trainer(trainer):
 def main(config, resume=False):
 
     # Model initialization
-    if config.model_select == 'attention':
-        model = SelfAttention(
-            feature_dim = 1, 
-            k = 10
-        )
-    elif config.model_select == 'sum' :
+
+    if config.model_select == 'simple' :
         model = SimpleNet(
             conv1_kernel_size=config.conv1_kernel_size,
             D=6)

@@ -2,32 +2,48 @@ import argparse
 import logging
 import os
 import time
+import open3d as o3d
+from lib.timer import Timer, AverageMeter
+from easydict import EasyDict as edict
 import torch
 import numpy as np
-from easydict import EasyDict as edict
-
 from rich.console import Console
 from rich.progress import track
 from rich.table import Table
-
 from config_test import get_config
-from datasets.threedmatch_dataset import ThreeDMatchTestDataset
-from datasets.data_loaders import make_data_loader
-
 from model.network import PoseEstimator
 from model.simpleunet import SimpleNet
-from lib.timer import Timer, AverageMeter
-
+from datasets.data_loaders import make_data_loader
+from datasets.collate import CollateFunc as coll
 from tools.file import ensure_dir
+from datasets.threedmatch_dataset import ThreeDMatchTestDataset
+from datasets.kitti import KITTIDataset
+from tools.pointcloud import draw_registration_result, make_open3d_point_cloud
 from tools.test_utils import datasets_setting
-from tools.utils import rte_rre
 
+from model import load_model
+import MinkowskiEngine as ME
 
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-ALL_DATASETS = [ThreeDMatchTestDataset]
+ALL_DATASETS = [ThreeDMatchTestDataset, KITTIDataset]
 dataset_str_mapping = {d.__name__: d for d in ALL_DATASETS}
+
+def get_overlap_ratio(source,target,threshold=0.03):
+    """
+    We compute overlap ratio from source point cloud to target point cloud
+    """
+    pcd_tree = o3d.geometry.KDTreeFlann(target)
+    
+    match_count=0
+    for i, point in enumerate(source.points):
+        [count, _, _] = pcd_tree.search_radius_vector_3d(point, threshold)
+        if(count!=0):
+            match_count+=1
+
+    overlap_ratio = match_count / len(source.points)
+    return overlap_ratio
 
 def print_table(subset_names, stats, rte_ths, rre_ths):
     console = Console()
@@ -63,6 +79,24 @@ def print_table(subset_names, stats, rte_ths, rre_ths):
     table.add_row("avg", *[f"{m:.4f}" for m in metrics])
     console.print(table)
 
+
+def rte_rre(T_pred, T_gt, rte_thresh, rre_thresh, eps=1e-8):
+    if T_pred is None:
+        return np.array([0, np.inf, np.inf])
+
+    rte = np.linalg.norm(T_pred[:3, 3] - T_gt[:3, 3]) * 100
+    rre = (
+        np.arccos(
+            np.clip(
+                (np.trace(T_pred[:3, :3].T @ T_gt[:3, :3]) - 1) / 2, -1 + eps, 1 - eps
+            )
+        )
+        * 180
+        / np.pi
+    )
+    return np.array([rte < rte_thresh and rre < rre_thresh, rte, rre])
+
+
 def run_benchmark(
     data_loader,
     method,
@@ -78,8 +112,9 @@ def run_benchmark(
 
     dataset = data_loader.dataset
     subset_names = dataset.subset_names
-
     pose_estimate = PoseEstimator(config).to(device)
+
+    data_list = []
 
     stats = np.zeros((tot_num_data, 5))
     stats[:, -1] = -1
@@ -96,10 +131,11 @@ def run_benchmark(
             sinput0, sinput1, src_over, tgt_over, over_index0, over_index1 = datasets_setting(xyz0, xyz1, T_gt, voxel_size, overlap, device)
 
             start = time.time()            
-            T, _, _ = pose_estimate(sinput0, sinput1, torch.from_numpy(src_over).to(device), torch.from_numpy(tgt_over).to(device), over_index0, over_index1, method.to(device))
+            T, _ = pose_estimate(sinput0, sinput1, torch.from_numpy(src_over).to(device), torch.from_numpy(tgt_over).to(device), over_index0, over_index1, method.to(device))
             end = time.time()
 
             result = rte_rre(T, T_gt, TE_THRESH, RE_THRESH)
+
             stats[batch_idx, :3] = result
             stats[batch_idx, 3] = end - start
             stats[batch_idx, 4] = sid
@@ -111,6 +147,17 @@ def run_benchmark(
 
             filename0 = f0.split('/')[-1]
             filename1 = f1.split('/')[-1]
+
+            # with open(f'./overlaps_ratio.txt','a') as f:
+
+            #     # load, downsample and transform
+            #     pcd1=make_open3d_point_cloud(xyz0)
+            #     pcd2=make_open3d_point_cloud(xyz1)
+
+            #     # calculate overlap
+            #     c_overlap = get_overlap_ratio(pcd1,pcd2)
+            #     f.write(f'{filename0}, {filename1}, {c_overlap:.4f}\n')
+
 
             if float(recall) == 1 and float(rte) < 1.5 and float(rre) < 1 :
                 with open("./data_list.txt", "a") as f:
@@ -132,21 +179,25 @@ def run_benchmark(
 def test(args):
 
     ensure_dir(args.target)
-    checkpoint = torch.load(args.model,map_location='cpu')
+    checkpoint = torch.load(args.model)
+    feat_checkpoint = torch.load(args.feat_weight)
     config = checkpoint['config']
 
     # initialize Model
     search_voxel_size = config.voxel_size * config.positive_pair_search_voxel_size_multiplier
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+    num_feats = 1
     model = SimpleNet(
             conv1_kernel_size=config.conv1_kernel_size,
             D=6)
-            
     model.load_state_dict(checkpoint['state_dict'])
     model.eval()
   
+    timer, tmeter = Timer(), AverageMeter()
+
     # initialize data loader
+
     test_loader = make_data_loader(
         args,
         args.test_phase,

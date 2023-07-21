@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from torch_batch_svd import svd as fast_svd
 
-from model.resunet import ResUNetBN2C
+# from model.resunet import ResUNetBN2C
 from model.simpleunet import SimpleNet
 
 from tools.radius import feature_matching
@@ -17,7 +17,7 @@ from lib.timer import random_quad, random_triplet
 
 from model.feature import FCGF, FPFH ,Predator
 
-from tools.utils import  square_distance
+from tools.utils import  square_distance, shift_scale_points
 
 
 
@@ -154,7 +154,7 @@ class PoseEstimator(ME.MinkowskiNetwork):
 
         feat0_mean = feat0_sel.mean(1, keepdim=True).squeeze(dim=1)
         feat1_mean = feat1_sel.mean(1, keepdim=True).squeeze(dim=1)
-
+              
         N, _ = feat0_mean.shape
         M, _ = feat1_mean.shape
 
@@ -170,6 +170,31 @@ class PoseEstimator(ME.MinkowskiNetwork):
         final_dist = dist.min(dim=1).values
 
         return final_dist
+    
+    def pairwise_distance_batch(self, feat0, feat1, pairs, triplets):
+        """ 
+            pairwise_distance
+            Args:
+                x: Input features of source point clouds. Size [B, c, N]
+                y: Input features of source point clouds. Size [B, c, M]
+            Returns:
+                pair_distances: Euclidean distance. Size [B, N, M]
+        """
+        x = feat0[pairs[triplets, 0]]
+        y = feat1[pairs[triplets, 1]]
+
+        xx = torch.sum(torch.mul(x,x), 1, keepdim = True)#[b,1,n]
+        yy = torch.sum(torch.mul(y,y),1, keepdim = True) #[b,1,n]
+        inner = -2*torch.matmul(x.transpose(2,1),y) #[b,n,n]
+        pair_distance = xx.transpose(2,1) + inner + yy #[b,n,n]
+        device = torch.device('cuda')
+        zeros_matrix = torch.zeros_like(pair_distance,device = device)
+        pair_distance_square = torch.where(pair_distance > 0.0,pair_distance,zeros_matrix)
+        error_mask = torch.le(pair_distance_square,0.0)
+        pair_distances = torch.sqrt(pair_distance_square + error_mask.float()*1e-16)
+        pair_distances = torch.mul(pair_distances,(1.0-error_mask.float()))
+
+        return pair_distances
 
     def vote(self, Rs, ts, dist):
         r_coord = torch.floor(Rs / self.r_binsize)
@@ -193,6 +218,40 @@ class PoseEstimator(ME.MinkowskiNetwork):
         )
         return vote
     
+    def get_fourier_embeddings(self, input_vote):
+        # Follows - https://people.eecs.berkeley.edu/~bmild/fourfeat/index.html
+
+        coord = input_vote.C
+        feature = input_vote.F
+
+        if num_channels is None:
+            num_channels = self.gauss_B.shape[1] * 2
+
+        bsize, npoints = xyz.shape[0], xyz.shape[1]
+        assert num_channels > 0 and num_channels % 2 == 0
+        d_in, max_d_out = self.gauss_B.shape[0], self.gauss_B.shape[1]
+        d_out = num_channels // 2
+        assert d_out <= max_d_out
+        assert d_in == xyz.shape[-1]
+
+        # clone coords so that shift/scale operations do not affect original tensor
+        orig_xyz = xyz
+        xyz = orig_xyz.clone()
+
+        ncoords = xyz.shape[1]
+        # if self.normalize:
+        #     xyz = shift_scale_points(xyz, src_range=input_range)
+
+        xyz *= 2 * np.pi
+        xyz_proj = torch.mm(xyz.view(-1, d_in), self.gauss_B[:, :d_out]).view(
+            bsize, npoints, d_out
+        )
+        final_embeds = [xyz_proj.sin(), xyz_proj.cos()]
+
+        # return batch x d_pos x npoints embedding
+        final_embeds = torch.cat(final_embeds, dim=2).permute(0, 2, 1)
+        return final_embeds
+    
     def evaluate(self, vote):
         max_index = vote.F.squeeze(1).argmax()
         max_value = vote.C[max_index, 1:]
@@ -201,7 +260,7 @@ class PoseEstimator(ME.MinkowskiNetwork):
         R = axis_angle_to_rotation(angle)
         return R, t
 
-    def forward(self, full_pcd0, full_pcd1, over_xyz0, over_xyz1, over_index0, over_index1 , refine_model):
+    def forward(self, full_pcd0, full_pcd1, over_xyz0, over_xyz1, over_index0, over_index1 ,refine_model):
         
         global rotation
         global translate
@@ -223,6 +282,7 @@ class PoseEstimator(ME.MinkowskiNetwork):
         full_over_feat1 = full_out1[over_index1,:].to(full_pcd0.device)
         
         pairs, combinations, confidence = self.sample_correspondence(over_xyz0, over_xyz1, full_over_feat0, full_over_feat1)
+        # try :
         angles, ts = self.solve(over_xyz0, over_xyz1, pairs, combinations)
 
         dist = self.feature_measure(full_over_feat0, full_over_feat1, pairs, combinations)
@@ -231,24 +291,30 @@ class PoseEstimator(ME.MinkowskiNetwork):
         votes = self.vote(angles, ts, dist)
 
         # gaussian smoothing
-        """ if self.smoothing:
-            votes = sparse_gaussian(
-                votes, kernel_size=self.kernel_size, dimension=6
-            )
-        """
+        # if self.smoothing:
+        #     votes = sparse_gaussian(
+        #         votes, kernel_size=self.kernel_size, dimension=6
+        #     )
+
         # post processing
-        """
+        #if self.refine_model is not None:
+        #    votes = self.refine_model(votes)
+
         if refine_model is not None:
-            votes = refine_model(votes)      
-        """
-
-        votes = refine_model(votes)  
-
+            votes = refine_model(votes)
+        
         rotation, translate = self.evaluate(votes)
         self.hspace = votes
         Transform = torch.eye(4)
         Transform[:3, :3] = rotation
         Transform[:3, 3] = translate
+
+        # except Exception as e:
+
+        #     return torch.eye(4), votes
+
+
+        #draw_registration_result(xyz0.detach().cpu().numpy(), xyz1.detach().cpu().numpy(), Transform)
 
         # empty cache
         gc.collect()

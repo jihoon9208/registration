@@ -78,7 +78,7 @@ misc_arg.add_argument('--use_gpu', type=str2bool, default=True)
 misc_arg.add_argument('--verbose', type=str2bool, default=True)
 misc_arg.add_argument('--verbose_freq', type=int, default=100)
 misc_arg.add_argument('--weights', type=str, default=None)
-misc_arg.add_argument('--feat_weight', type=str, default='./weights/fcgf_3dmatch_50.pth')
+misc_arg.add_argument('--feat_weight', type=str, default='./weights/fcgf_3dmatch_25.pth')
 misc_arg.add_argument('--resume', type=str, default=None)
 misc_arg.add_argument('--resume_dir', type=str, default='./outputs')
 misc_arg.add_argument('--train_num_thread', type=int, default=2)
@@ -96,7 +96,7 @@ data_arg.add_argument('--dataset', type=str, default='ThreeDMatchTestDataset')
 data_arg.add_argument('--descriptor', type=str, default='predator')
 data_arg.add_argument("--run_name",default="test", type=str, required=False, help="experiment title")
 
-data_arg.add_argument('--voxel_size', type=float, default=0.05)
+data_arg.add_argument('--voxel_size', type=float, default=0.025)
 data_arg.add_argument(
     '--positive_pair_search_voxel_size_multiplier', type=float, default=1.5)
 data_arg.add_argument(
@@ -106,7 +106,7 @@ data_arg.add_argument(
 data_arg.add_argument(
     '--target', default='./features_tmp/', type=str, help='path to produce generated data')
 data_arg.add_argument(
-    '--model', default='./outputs/best_val_recall_checkpoint.pth', type=str,  help='path to checkpoint')
+    '--model', default='./outputs/0721_0.025_0.02/best_val_recall_checkpoint.pth', type=str,  help='path to checkpoint')
 
 
 data_arg.add_argument(
